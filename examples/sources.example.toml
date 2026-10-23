@@ -1,0 +1,68 @@
+# agents-vault sources: what `sec import` copies into the vault.
+# Copy to ~/.config/agents-vault/sources.toml and edit.
+# Lists paths and names only, NEVER secret values; values are read from the
+# files at import time. Entry paths are group/.../title.
+# Re-running the import updates these entries from their sources; entries not
+# listed here (added by hand or by agents with `sec set`) are never touched.
+
+# A dotenv file. Secret-looking vars (PASSWORD, SECRET, TOKEN, *_KEY, URLs with
+# user:pass@ ...) become protected fields; the whole file is attached as `.env`.
+[[env]]
+entry = "myapp/api-dev"
+file  = "~/Dev/myapp/api/.env"
+desc  = "myapp API, local dev"
+# secret_vars = ["SOME_ODD_NAME"]   # force extra vars to be treated as secrets
+
+# An SSH private key (+ .pub when present).
+[[ssh]]
+entry = "ssh/build-server"
+key   = "~/.ssh/build_server"
+user  = "deploy"
+host  = "203.0.113.10"
+desc  = "CI build host"
+
+# Files or whole directories as attachments; optional password from a file.
+[[files]]
+entry = "kube/kubeconfig"
+paths = ["~/.kube/config"]
+desc  = "kubeconfig (dev contexts only)"
+
+# One value from a file: whole content, or the first regex group.
+[[value]]
+entry   = "digitalocean/doctl"
+file    = "~/.config/doctl/config.yaml"
+pattern = '^access-token:\s*(\S+)'
+field   = "DIGITALOCEAN_ACCESS_TOKEN"   # optional extra field name for `sec run`
+url     = "https://cloud.digitalocean.com"
+desc    = "DigitalOcean API token used by doctl"
+
+# Static keys of an AWS profile in ~/.aws/credentials.
+[[aws_profile]]
+entry   = "aws/dev"
+profile = "dev"
+desc    = "AWS dev account"
+
+# The token gh is logged in with.
+[[gh_token]]
+entry    = "github/gh-cli"
+username = "my-github-user"
+desc     = "gh CLI OAuth token"
+
+# Every registry in ~/.docker/config.json -> <group>/<registry>.
+[[docker_auths]]
+group = "docker"
+
+# Every locally-managed cloudflared tunnel in ~/.cloudflared -> <group>/tunnel-<name>.
+[[cloudflared_tunnels]]
+group = "cloudflare"
+
+# One key of a Kubernetes secret.
+[[k8s_secret]]
+entry     = "cloudflare/dns-edit"
+context   = "my-cluster"
+namespace = "cert-manager"
+secret    = "cloudflare-api-token"
+key       = "api-token"
+field     = "CLOUDFLARE_API_TOKEN"
+url       = "https://dash.cloudflare.com"
+desc      = "DNS:Edit on example.com"

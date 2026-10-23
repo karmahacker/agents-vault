@@ -1,0 +1,12 @@
+# Never commit vault material or credentials.
+*.kdbx
+*.kdbx.*
+*.keyx
+*.key
+*.pem
+.env
+.env.*
+*.env
+backups/
+sources.toml
+!examples/*.toml

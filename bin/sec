@@ -1,0 +1,175 @@
+#!/usr/bin/env bash
+# sec — agent access to the local KeePassXC vault (~/.agents-vault).
+# Key-file unlock, no password. Writes are serialized with flock and
+# preceded by a timestamped backup.
+set -euo pipefail
+
+VAULT_DIR="${SEC_VAULT_DIR:-$HOME/.agents-vault}"
+DB="$VAULT_DIR/agents.kdbx"
+KEY="$VAULT_DIR/agents.keyx"
+BACKUPS="$VAULT_DIR/backups"
+KEEP_BACKUPS=200
+
+die() { echo "sec: $*" >&2; exit 1; }
+kp()  { keepassxc-cli "$1" --no-password -k "$KEY" "${@:2}"; }
+
+[[ -r $DB && -r $KEY ]] || die "vault not found at $VAULT_DIR"
+
+backup() {
+  cp -p "$DB" "$BACKUPS/agents-$(date +%Y%m%d-%H%M%S-%N).kdbx"
+  ls -1t "$BACKUPS"/agents-*.kdbx | tail -n +$((KEEP_BACKUPS + 1)) | xargs -r rm -f
+}
+
+# Run a mutating command under an exclusive lock, after a backup.
+write() {
+  exec 9>"$VAULT_DIR/.lock"
+  flock -w 30 9 || die "vault is locked by another writer"
+  backup
+  "$@"
+}
+
+# Create any missing parent groups of entry path a/b/c.
+ensure_groups() {
+  local path="" part
+  IFS=/ read -ra parts <<<"$(dirname "$1")"
+  for part in "${parts[@]}"; do
+    [[ -z $part || $part == . ]] && continue
+    path="${path:+$path/}$part"
+    kp ls "$DB" "$path" >/dev/null 2>&1 || kp mkdir "$DB" "$path" >/dev/null
+  done
+}
+
+exists() { kp show "$DB" "$1" >/dev/null 2>&1; }
+
+# Read the secret value from stdin (never from argv, which shows in ps/history).
+read_value() {
+  [[ -t 0 ]] && die "pipe the secret on stdin, e.g.: printf %s \"\$TOKEN\" | sec set $1"
+  local v; v="$(cat)"; v="${v%$'\n'}"
+  [[ -n $v ]] || die "empty secret on stdin"
+  printf '%s' "$v"
+}
+
+usage() {
+  cat <<'U'
+Usage:
+  sec ls [group]                       list entries (names only, no values)
+  sec find <term>                      search entry titles/fields
+  sec info <entry>                     metadata, field names, files (values hidden)
+  sec get <entry> [attr]               print one value (default attr: Password)
+                                       attrs: Password UserName URL Notes or any custom field
+  sec run VAR=entry[:attr] ... -- cmd  run cmd with secrets in its environment
+  sec run @entry ... -- cmd            same, loading every var of the entry's .env file
+  sec set <entry> [-u user] [--url url] [--notes text]
+                                       create/update; secret read from STDIN
+  sec meta <entry> [-u user] [--url url] [--notes text]
+                                       update metadata only, keep the secret
+  sec gen <entry> [-u user] [--url url] [-L len]
+                                       create/update with a generated password
+  sec mv <entry> <group>               move entry to another group
+  sec rm <entry>                       delete (moves to Recycle Bin)
+  sec file ls <entry>                  list attachments
+  sec file put <entry> <name> <path>   attach a file (certs, keys, kubeconfigs)
+  sec file get <entry> <name> <out>    export an attachment to a path (0600)
+  sec backups                          list automatic backups
+  sec import [--dry-run]               refresh imported entries from their source files
+Entries are paths like cloudflare/dns-edit; groups are created as needed.
+U
+}
+
+cmd="${1:-help}"; shift || true
+case "$cmd" in
+  ls)    kp ls -R -f "$DB" ${1:+"$1"} ;;
+  find)  [[ $# -ge 1 ]] || die "find <term>"; kp search "$DB" "$1" ;;
+  info)  [[ $# -ge 1 ]] || die "info <entry>"; kp show --all --show-attachments "$DB" "$1" ;;
+  get)   [[ $# -ge 1 ]] || die "get <entry> [attr]"; kp show -a "${2:-Password}" "$DB" "$1" ;;
+
+  run)
+    envs=()
+    while [[ $# -gt 0 && $1 != -- ]]; do
+      if [[ $1 == @* ]]; then
+        # Load every VAR=value from the entry's .env attachment.
+        tmp="$(mktemp "$VAULT_DIR/.envXXXXXX")"
+        if ! kp attachment-export --stdout "$DB" "${1#@}" .env >"$tmp" 2>/dev/null; then
+          rm -f "$tmp"; die "run: $1 has no .env attachment"
+        fi
+        while IFS= read -r line || [[ -n $line ]]; do
+          [[ $line =~ ^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]] || continue
+          k="${BASH_REMATCH[2]}" v="${BASH_REMATCH[3]}"
+          if [[ $v =~ ^\"(.*)\"[[:space:]]*$ || $v =~ ^\'(.*)\'[[:space:]]*$ ]]; then v="${BASH_REMATCH[1]}"; fi
+          envs+=("$k=$v")
+        done <"$tmp"
+        rm -f "$tmp"; shift; continue
+      fi
+      [[ $1 == *=* ]] || die "run: expected VAR=entry[:attr] or @entry, got '$1'"
+      var="${1%%=*}" ref="${1#*=}" attr=Password
+      [[ $ref == *:* ]] && { attr="${ref##*:}"; ref="${ref%:*}"; }
+      val="$(kp show -a "$attr" "$DB" "$ref")" || die "run: cannot read $ref:$attr"
+      envs+=("$var=$val"); shift
+    done
+    [[ ${1:-} == -- ]] && shift
+    [[ $# -ge 1 ]] || die "run: missing command after --"
+    exec env "${envs[@]}" "$@"
+    ;;
+
+  set|gen|meta)
+    [[ $# -ge 1 ]] || die "$cmd <entry> [options]"
+    entry="$1"; shift
+    opts=() len=32
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        -u|--user)  opts+=(-u "$2"); shift 2 ;;
+        --url)      opts+=(--url "$2"); shift 2 ;;
+        --notes)    opts+=(--notes "$2"); shift 2 ;;
+        -L)         len="$2"; shift 2 ;;
+        *) die "$cmd: unknown option $1" ;;
+      esac
+    done
+    if [[ $cmd == meta ]]; then
+      exists "$entry" || die "meta: no such entry $entry"
+      [[ ${#opts[@]} -gt 0 ]] || die "meta: nothing to change"
+      write kp edit "${opts[@]}" "$DB" "$entry" >/dev/null
+    elif [[ $cmd == gen ]]; then
+      if exists "$entry"; then
+        write kp edit "${opts[@]}" -g -L "$len" -lUn "$DB" "$entry" >/dev/null
+      else
+        write ensure_groups "$entry"
+        kp add "${opts[@]}" -g -L "$len" -lUn "$DB" "$entry" >/dev/null
+      fi
+    else
+      val="$(read_value "$entry")"
+      if exists "$entry"; then
+        printf '%s\n' "$val" | write kp edit "${opts[@]}" -p "$DB" "$entry" >/dev/null 2>&1
+      else
+        write ensure_groups "$entry"
+        printf '%s\n' "$val" | kp add "${opts[@]}" -p "$DB" "$entry" >/dev/null 2>&1
+      fi
+    fi
+    exists "$entry" || die "$cmd: write failed for $entry"
+    echo "saved $entry"
+    ;;
+
+  mv)    [[ $# -eq 2 ]] || die "mv <entry> <group>"; write kp mv "$DB" "$1" "$2" ;;
+  rm)    [[ $# -eq 1 ]] || die "rm <entry>"; write kp rm "$DB" "$1" ;;
+
+  file)
+    sub="${1:-}"; shift || true
+    case "$sub" in
+      ls)  [[ $# -eq 1 ]] || die "file ls <entry>"
+           kp show --show-attachments "$DB" "$1" | sed -n '/^Attachments:/,$p' ;;
+      put) [[ $# -eq 3 ]] || die "file put <entry> <name> <path>"
+           [[ -r $3 ]] || die "cannot read $3"
+           if ! exists "$1"; then
+             write ensure_groups "$1"; kp add "$DB" "$1" >/dev/null
+           fi
+           write kp attachment-import -f "$DB" "$1" "$2" "$3" ;;
+      get) [[ $# -eq 3 ]] || die "file get <entry> <name> <out>"
+           (umask 077; kp attachment-export "$DB" "$1" "$2" "$3") ;;
+      *)   die "file ls|put|get" ;;
+    esac
+    ;;
+
+  backups) ls -1t "$VAULT_DIR/backups" ;;
+  import)  exec python3 "${SEC_IMPORTER:-$HOME/.local/share/agents-vault/import.py}" "$@" ;;
+  help|-h|--help) usage ;;
+  *) usage >&2; exit 2 ;;
+esac

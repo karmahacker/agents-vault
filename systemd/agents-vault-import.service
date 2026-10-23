@@ -1,0 +1,7 @@
+[Unit]
+Description=Refresh agents vault from credential files on this host
+
+[Service]
+Type=oneshot
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/python3 %h/.local/share/agents-vault/import.py
