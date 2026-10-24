@@ -88,17 +88,25 @@ the repository's CI runs CLI and MCP tests on both Linux and macOS.
 ### Let a coding agent handle installation
 
 Open your coding agent on the Linux or macOS host where the vault should live, under the user account that
-will use it, and paste this prompt. The agent needs terminal access to that host and access to this
-repository: open the session in its checkout, or provide its clone URL with the prompt.
+will use it, and paste the entire prompt below. It includes the public repository URL, so a fresh
+agent session can clone it without any extra context. The agent needs terminal and network access.
 If administrator authentication is needed, complete it through your terminal or the
 agent's private approval interface; do not paste a password into chat.
 
 ```text
 Install or upgrade agents-vault on this host and validate the installed tools.
-Use the agents-vault checkout in this workspace, or clone the repository URL I
-provide. If neither is available, ask me for the clone URL. Read its
-README and applicable agent instructions first. Use main unless I specify another
-branch, and fetch current code without discarding local edits.
+Repository: https://github.com/karmahacker/agents-vault.git
+Default branch: main
+
+Use an existing checkout of this repository if available. Otherwise run:
+git clone --branch main https://github.com/karmahacker/agents-vault.git
+cd agents-vault
+
+Read the checkout's README and applicable agent instructions first. Use main
+unless I specify another branch, and fetch current code without discarding local
+edits. If an existing agents-vault directory belongs to a different repository,
+choose a new directory rather than overwriting it. Do not stop at clone/setup
+instructions: continue with installation and validation below.
 
 Check the OS, Python >= 3.11, and keepassxc-cli >= 2.7. On Linux check the
 systemd user session; on macOS check Homebrew and the graphical login session. Install missing dependencies using the documented procedure. Preserve
@@ -134,7 +142,7 @@ and any remaining manual action. Do the installation, not just describe the step
 ### Manual installation
 
 ```bash
-git clone <this repo> agents-vault
+git clone --branch main https://github.com/karmahacker/agents-vault.git agents-vault
 cd agents-vault
 
 # 1. Describe what to import (paths only, never values). Start from the example:
