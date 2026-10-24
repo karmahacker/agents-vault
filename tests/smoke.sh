@@ -69,7 +69,7 @@ sec meta manual/thing --notes "new notes" >/dev/null
 eq "$(sec get manual/thing Notes)" "new notes" "meta edits notes"
 eq "$(sec get manual/thing)" "hunter3" "meta keeps secret"
 sec gen manual/gen -L 24 >/dev/null
-eq "$(sec get manual/gen | tr -d '\n' | wc -c)" "24" "gen creates password of length"
+eq "$(sec get manual/gen | tr -d '\n' | wc -c | tr -d '[:space:]')" "24" "gen creates password of length"
 sec set manual/empty </dev/null 2>/dev/null && fail "empty secret accepted"; ok "empty secret rejected"
 sec import >/dev/null
 eq "$(sec get manual/thing)" "hunter3" "import leaves hand-added entries alone"
