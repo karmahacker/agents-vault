@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # sec — agent access to the local KeePassXC vault (~/.agents-vault).
-# Key-file unlock, no password. Writes are serialized with flock and
+# Key-file unlock, no password. Writes are serialized with Python fcntl.flock and
 # preceded by a timestamped backup.
 set -euo pipefail
 
@@ -8,6 +8,8 @@ VAULT_DIR="${SEC_VAULT_DIR:-$HOME/.agents-vault}"
 DB="$VAULT_DIR/agents.kdbx"
 KEY="$VAULT_DIR/agents.keyx"
 LIB_DIR="$(dirname "${SEC_IMPORTER:-$HOME/.local/share/agents-vault/import.py}")"
+
+[[ ! -f $LIB_DIR/runtime.sh ]] || source "$LIB_DIR/runtime.sh"
 
 die() { echo "sec: $*" >&2; exit 1; }
 kp()  { keepassxc-cli "$1" --no-password -k "$KEY" "${@:2}"; }
@@ -21,7 +23,7 @@ backup() {
 # Run a mutating command under an exclusive lock, after a backup.
 write() {
   exec 9>"$VAULT_DIR/.lock"
-  flock -w 30 9 || die "vault is locked by another writer"
+  python3 "$LIB_DIR/common.py" lock 9 || exit 1
   backup
   "$@"
 }
@@ -99,21 +101,21 @@ case "$cmd" in
     if [[ $cmd == meta ]]; then
       exists "$entry" || die "meta: no such entry $entry"
       [[ ${#opts[@]} -gt 0 ]] || die "meta: nothing to change"
-      write kp edit "${opts[@]}" "$DB" "$entry" >/dev/null
+      write kp edit ${opts[@]+"${opts[@]}"} "$DB" "$entry" >/dev/null
     elif [[ $cmd == gen ]]; then
       if exists "$entry"; then
-        write kp edit "${opts[@]}" -g -L "$len" -lUn "$DB" "$entry" >/dev/null
+        write kp edit ${opts[@]+"${opts[@]}"} -g -L "$len" -lUn "$DB" "$entry" >/dev/null
       else
         write ensure_groups "$entry"
-        kp add "${opts[@]}" -g -L "$len" -lUn "$DB" "$entry" >/dev/null
+        kp add ${opts[@]+"${opts[@]}"} -g -L "$len" -lUn "$DB" "$entry" >/dev/null
       fi
     else
       val="$(read_value "$entry")"
       if exists "$entry"; then
-        printf '%s\n' "$val" | write kp edit "${opts[@]}" -p "$DB" "$entry" >/dev/null 2>&1
+        printf '%s\n' "$val" | write kp edit ${opts[@]+"${opts[@]}"} -p "$DB" "$entry" >/dev/null 2>&1
       else
         write ensure_groups "$entry"
-        printf '%s\n' "$val" | kp add "${opts[@]}" -p "$DB" "$entry" >/dev/null 2>&1
+        printf '%s\n' "$val" | kp add ${opts[@]+"${opts[@]}"} -p "$DB" "$entry" >/dev/null 2>&1
       fi
     fi
     exists "$entry" || die "$cmd: write failed for $entry"

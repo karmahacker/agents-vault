@@ -53,12 +53,13 @@ read audit log. Anyone with access to both the database and key file can read it
 |---|---|
 | `install.sh` | installs/upgrades everything on a host (idempotent, never replaces an existing vault) |
 | `bin/sec` | the CLI agents use |
+| `bin/sec-mcp`, `lib/mcp_server.py` | optional local MCP discovery interface |
 | `lib/common.py` | shared dotenv parser, command environment, and backup retention |
 | `lib/import.py` | the importer behind `sec import` (stdlib Python >= 3.11 + keepassxc-cli) |
 | `examples/sources.example.toml` | every source type, documented |
 | `templates/agent-rule.md` | the section added to CLAUDE.md / AGENTS.md / GEMINI.md |
 | `templates/vault-README.md` | guide placed at `~/.agents-vault/README.md` for agents |
-| `systemd/` | hourly `agents-vault-import` user timer |
+| `systemd/`, `lib/launchd.py` | hourly imports through systemd on Linux or launchd on macOS |
 | `tests/smoke.sh` | end-to-end test on a throwaway vault |
 | `tools/check-no-secrets.sh` | fails if any vault value appears in this repo (pre-commit hook) |
 
@@ -76,14 +77,17 @@ read audit log. Anyone with access to both the database and key file can read it
   rules tell agents to use `sec run` (values go into the child process's environment) rather than printing them.
 - **The vault is an index, not the only copy.** The importer copies; it never moves or deletes source files.
 
-## Install on a new agent server
+## Install on Linux or macOS
 
-Requirements: Linux with systemd, `sudo`, Python >= 3.11, `keepassxc-cli` >= 2.7 (installed by the script on
-apt systems). Tested on Ubuntu 24.04 with KeePassXC 2.7.6.
+Requirements: Python >= 3.11 and `keepassxc-cli` >= 2.7. Linux uses a systemd user timer;
+macOS uses a per-user launchd agent. The CLI works without a scheduler (`--no-timer`).
+Linux apt systems can install KeePassXC through `sudo`; macOS can install missing dependencies
+through [Homebrew](https://brew.sh/). Linux was tested locally on Ubuntu 24.04 with KeePassXC 2.7.6;
+the repository's CI runs CLI and MCP tests on both Linux and macOS.
 
 ### Let a coding agent handle installation
 
-Open your coding agent on the Linux host where the vault should live, under the user account that
+Open your coding agent on the Linux or macOS host where the vault should live, under the user account that
 will use it, and paste this prompt. The agent needs terminal access to that host and access to this
 repository: open the session in its checkout, or provide its clone URL with the prompt.
 If administrator authentication is needed, complete it through your terminal or the
@@ -96,8 +100,8 @@ provide. If neither is available, ask me for the clone URL. Read its
 README and applicable agent instructions first. Use main unless I specify another
 branch, and fetch current code without discarding local edits.
 
-Check Linux, Python >= 3.11, keepassxc-cli >= 2.7, flock, and the systemd user
-session. Install missing dependencies using the documented procedure. Preserve
+Check the OS, Python >= 3.11, and keepassxc-cli >= 2.7. On Linux check the
+systemd user session; on macOS check Homebrew and the graphical login session. Install missing dependencies using the documented procedure. Preserve
 any existing vault, key file, sources configuration, and unrelated agent rules.
 If an existing vault or key is missing its counterpart, stop and report it rather
 than creating a replacement. Never print credentials or put them in command
@@ -110,8 +114,8 @@ sources. Exclude production/staging credentials and coding-agent login files.
 For an upgrade, retain the existing sources and installation preferences.
 
 Run ./install.sh with the appropriate documented flags. Set up the hourly user
-timer and enable linger for this user so imports continue after logout. If the
-host cannot support those steps or required privileges are unavailable, complete
+schedule: use systemd and enable linger on Linux; use a launchd LaunchAgent
+on macOS. Mac imports run only while logged in and awake. If the host cannot support those steps or required privileges are unavailable, complete
 the independent steps and report exactly what remains incomplete.
 
 Validate with tests/smoke.sh and python3 tests/regression.py (throwaway data).
@@ -119,8 +123,8 @@ Then verify the installed sec resolves to the expected location, run sec help
 and sec ls without displaying values, and run sec import --dry-run. After the
 initial import, expect 0 would change; investigate changes or skipped sources
 instead of treating an exit code alone as success. Check that the user timer is
-enabled and active, linger is enabled, and the installed guide and agent rules
-are present. Confirm the vault directory is mode 0700 and the database and key
+enabled and active on Linux (with linger), or the LaunchAgent is loaded on
+macOS. Check that the installed guide and agent rules are present. Confirm the vault directory is mode 0700 and the database and key
 are mode 0600. Do not rotate credentials or contact external services to test them.
 
 Finish with the installed branch and commit, checks passed, any skipped sources,
@@ -141,8 +145,9 @@ $EDITOR ~/.config/agents-vault/sources.toml     # rebuilding a host? restore its
 # 2. Install: deps, sec, importer, vault + key file, hourly timer, agent rules, first import.
 ./install.sh
 
-# 3. Let the timer run while nobody is logged in.
-sudo loginctl enable-linger "$USER"
+# 3. Linux only: let the timer run while nobody is logged in.
+# On macOS, skip this step; the LaunchAgent runs in your logged-in session.
+if [ "$(uname -s)" = Linux ]; then sudo loginctl enable-linger "$USER"; fi
 
 # 4. Verify.
 tests/smoke.sh                 # throwaway vault, touches nothing real
@@ -154,9 +159,50 @@ Then check that a fresh agent uses it without help, e.g.
 `claude -p "Find our Cloudflare DNS token and check it works with a read-only API call; don't show it."`.
 
 Installer flags: `--sources FILE` (install FILE as sources.toml if none exists), `--no-system-link`,
-`--no-timer`, `--no-rules`, `--no-import`. Re-running `./install.sh` after `git pull` upgrades `sec` and the
+`--no-timer`, `--no-rules`, `--no-import`, `--with-mcp`. Re-running `./install.sh` after `git pull` upgrades `sec` and the
 importer in place and refreshes the agent rules and installed guide. It preserves the existing database,
 key file and sources configuration; the default import can update imported entries.
+
+### macOS setup and scheduled imports
+
+Install [Homebrew](https://brew.sh/) if needed, then:
+
+```bash
+brew install python
+brew install --cask keepassxc
+./install.sh
+# Optional MCP interface:
+# ./install.sh --with-mcp --no-import
+```
+
+Homebrew's [KeePassXC cask](https://formulae.brew.sh/cask/keepassxc) includes `keepassxc-cli`.
+The installer also recognizes the CLI in `/Applications/KeePassXC.app/Contents/MacOS` for a
+manual app installation. It checks both Apple Silicon (`/opt/homebrew`) and Intel (`/usr/local`)
+Homebrew paths. No GNU `flock`, coreutils, or replacement Bash is required.
+
+On macOS, installation defaults to user-local commands in `~/.local/bin`, without a system
+symlink or `sudo`. Add that directory to your shell's PATH, or invoke `~/.local/bin/sec` directly.
+The installer saves the Python and KeePassXC directories in a private `runtime.sh` alongside
+the installed scripts so GUI-launched agents can find them. Rerun installation if those
+applications move. MCP clients use `/Users/your-user/.local/bin/sec-mcp` as their command.
+
+Hourly imports use `~/Library/LaunchAgents/local.agents-vault.import.plist`, with absolute
+program paths and the selected vault and sources paths. The installer loads it in your GUI
+session when available; otherwise it is installed for the next graphical login. Per-user
+[LaunchAgents run while the user is logged in](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdJobs.html).
+This setup does not provide Linux-style linger: imports pause while logged out or asleep.
+Run `sec import` after waking if you need an immediate refresh.
+
+```bash
+launchctl print "gui/$(id -u)/local.agents-vault.import"
+# Trigger an import now through launchd:
+launchctl kickstart "gui/$(id -u)/local.agents-vault.import"
+```
+
+Import output is stored in `~/.agents-vault/import.log` and `import-error.log` (or the custom
+vault directory). These contain names and status messages; do not paste logs without reviewing
+them. Logs are not rotated automatically. `--no-timer` skips scheduler setup on either OS;
+it does not disable a schedule installed previously.
 
 ### Updating an installed version
 
@@ -174,7 +220,7 @@ use `git switch dev` instead. Commit or stash local edits before switching branc
 Pulling code alone does not update the installed copy.
 
 The installer updates `~/.local/bin/sec`, the Python files in `~/.local/share/agents-vault`,
-agent rules, the installed guide, and (when enabled) the systemd units. A differing installed guide
+agent rules, the installed guide, and (when enabled) the systemd units or macOS LaunchAgent. A differing installed guide
 is saved as `~/.agents-vault/README.md.previous.*` before replacement, preserving local notes.
 The existing vault, key, and sources configuration are retained. Imported entries refresh by default;
 to update software without importing, use `./install.sh --no-import`. Reuse flags such as
@@ -201,7 +247,8 @@ belong to the tools themselves).
 
 ## Using it (for agents and humans)
 
-These are `sec` CLI commands, not MCP tools. Run `sec help` for full syntax and options.
+These are the core `sec` CLI commands. The optional [MCP interface](#optional-mcp-interface)
+provides discovery tools alongside them. Run `sec help` for full syntax and options.
 
 | Feature | Command | What it does |
 |---|---|---|
@@ -245,6 +292,90 @@ inside quotes retain their whitespace. Duplicate names use the last assignment; 
 and other non-assignment lines are ignored. Inline `#` characters are literal. Variable expansion,
 escape decoding, and multiline values are not supported; the file is never executed as shell code.
 
+## Optional MCP interface
+
+The CLI works without MCP. Enable MCP when you want your agent client to discover structured
+vault tools automatically. This optional interface uses the [official MCP Python SDK](https://py.sdk.modelcontextprotocol.io/)
+and runs locally over **stdio**, launched by your client; it opens no HTTP port.
+
+### Install and connect
+
+```bash
+# From the repository checkout; keeps the existing vault and skips importing credentials.
+./install.sh --with-mcp --no-import
+```
+
+Python venv support is required (`sudo apt-get install python3-venv` on apt systems if missing; Homebrew Python includes it).
+The option installs the pinned SDK and its dependencies into
+`~/.local/share/agents-vault/mcp-venv` and adds `~/.local/bin/sec-mcp`.
+The default installation adds no MCP dependencies. Rerun with `--with-mcp` when upgrading MCP
+so its dependencies are refreshed too; normal upgrades refresh an existing MCP server's code.
+
+In your agent client's MCP settings, add a **local stdio server** whose command is the absolute
+path to `~/.local/bin/sec-mcp`, with no arguments. For clients using `mcpServers` JSON:
+
+```json
+{
+  "mcpServers": {
+    "agents-vault": {
+      "command": "/home/your-user/.local/bin/sec-mcp"
+    }
+  }
+}
+```
+
+Replace the example path with your actual home directory; `~` may not expand in client settings.
+Use the client's equivalent configuration format if it does not accept this JSON. The client must
+launch the server as the vault-owning OS user on the same host. If using a custom vault location,
+set `SEC_VAULT_DIR` in the server's environment to its absolute path. Do not put credentials in
+client configuration. Installation does not edit client settings automatically.
+
+Restart or reconnect your client, check that the three tools below appear, then call `list_entries`.
+A direct terminal launch waits for MCP protocol input; it is not an interactive CLI.
+To test the protocol using a throwaway vault from the checkout:
+
+```bash
+~/.local/share/agents-vault/mcp-venv/bin/python tests/mcp_integration.py
+```
+
+### Available tools
+
+| MCP tool | Arguments | Returns |
+|---|---|---|
+| `list_entries` | optional `group` | Entry paths, optionally restricted to a group and its descendants |
+| `find_entries` | `query` | Paths matching entry, field, or attachment names, case-insensitively |
+| `describe_entry` | `entry` | Entry path, field names, and attachment names |
+
+These tools are read-only. They do not return passwords, usernames, URLs, notes, custom-field
+values, or attachment contents. Search does not inspect values or notes. Names themselves are
+visible to the model: keep secrets out of entry, group, field, and attachment names.
+
+Use `sec run` for credential injection, `sec set` through stdin for saving, and `sec file` for
+attachments. There is no MCP password-return, credential-input, arbitrary-command, or file-export
+tool. Clients without terminal access can discover credentials but cannot use or update them
+through this interface alone. MCP does not replace the hourly importer or change its behavior.
+
+### Pros and cons
+
+**Advantages:** clients discover named tools and argument schemas without memorizing CLI syntax.
+The same discovery interface works across compatible MCP clients, with structured results that
+are easier for agents to interpret. Credential values stay out of these tool responses.
+
+**Trade-offs:** MCP adds a Python environment, SDK dependencies, client configuration, and another
+process to maintain. Tool availability and invocation depend on the client. Names and tool calls
+may be logged or sent to the model provider. The server process can decrypt the vault locally;
+its limited tool surface is not an OS security boundary or per-agent access control. Each request
+reads a fresh vault snapshot, so very large vaults may make discovery slower.
+
+For terminal-capable coding agents, **start with the CLI**. Add MCP for discovery convenience,
+not as a stronger permission system. A generic MCP tool returning a password would expose it to
+model context; this implementation intentionally keeps credential operations in the CLI.
+
+To disable MCP, remove its client configuration. To uninstall the optional components, stop the
+client's server process and remove `~/.local/bin/sec-mcp`,
+`~/.local/share/agents-vault/mcp_server.py`, and `~/.local/share/agents-vault/mcp-venv`.
+The CLI, vault, and import timer continue to work.
+
 ## The importer
 
 `sec import` reads `~/.config/agents-vault/sources.toml` (override with `AGENTS_VAULT_SOURCES` or `--config`).
@@ -286,8 +417,10 @@ How it behaves:
   host *before* running `./install.sh`. The installer keeps an existing vault.
 - **Rotating the key file.** Run `keepassxc-cli db-edit --set-key-file new.keyx --no-password -k agents.keyx agents.kdbx`,
   then replace `agents.keyx` and update the off-host copy.
-- **Uninstall.** `systemctl --user disable --now agents-vault-import.timer`; remove `~/.local/bin/sec`,
-  `/usr/local/bin/sec`, `~/.local/share/agents-vault`, and the "Secrets (agents vault)" sections. The vault
+- **Uninstall.** On Linux, run `systemctl --user disable --now agents-vault-import.timer`.
+  On macOS, run `launchctl bootout "gui/$(id -u)/local.agents-vault.import"` in your logged-in
+  session and remove `~/Library/LaunchAgents/local.agents-vault.import.plist`. Then remove `~/.local/bin/sec`,
+  `/usr/local/bin/sec`, `~/.local/bin/sec-mcp` (if installed), `~/.local/share/agents-vault`, and the "Secrets (agents vault)" sections. The vault
   stays in `~/.agents-vault` until you delete it.
 
 ## Gotchas found while building it

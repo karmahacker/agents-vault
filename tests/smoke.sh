@@ -53,7 +53,7 @@ sec info app/api-dev | grep -q "p@ss" && fail "info leaked a value"; ok "info hi
 eq "$(sec run @app/api-dev -- sh -c 'echo "$NODE_ENV|$DB_PASSWORD"')" "development|p@ss word" "run @entry loads whole .env"
 eq "$(sec run X=do/doctl:DIGITALOCEAN_ACCESS_TOKEN -- sh -c 'echo $X')" "tok-abc" "run VAR=entry:field"
 sec file get ssh/test id_test "$T/k" >/dev/null; cmp -s "$T/k" "$T/id_test" && ok "ssh key round-trips" || fail "ssh key differs"
-eq "$(stat -c %a "$T/k")" "600" "exported file is 0600"
+eq "$(python3 -c 'import os, sys; print(oct(os.stat(sys.argv[1]).st_mode & 0o777)[2:])' "$T/k")" "600" "exported file is 0600"
 
 printf 'JWT_SECRET=changed\n' >>"$T/app.env"
 out="$(sec import)"; grep -q "updated  app/api-dev" <<<"$out" || fail "changed source not updated: $out"; ok "changed source updates entry"
@@ -69,7 +69,7 @@ sec meta manual/thing --notes "new notes" >/dev/null
 eq "$(sec get manual/thing Notes)" "new notes" "meta edits notes"
 eq "$(sec get manual/thing)" "hunter3" "meta keeps secret"
 sec gen manual/gen -L 24 >/dev/null
-eq "$(sec get manual/gen | tr -d '\n' | wc -c)" "24" "gen creates password of length"
+eq "$(sec get manual/gen | tr -d '\n' | wc -c | tr -d '[:space:]')" "24" "gen creates password of length"
 sec set manual/empty </dev/null 2>/dev/null && fail "empty secret accepted"; ok "empty secret rejected"
 sec import >/dev/null
 eq "$(sec get manual/thing)" "hunter3" "import leaves hand-added entries alone"

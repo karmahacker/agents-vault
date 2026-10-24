@@ -1,5 +1,6 @@
 """Shared dotenv parsing, backup retention, and command execution for sec."""
 import os
+import fcntl
 from pathlib import Path
 import re
 import shutil
@@ -31,6 +32,19 @@ def backup(vault):
     # copy2 preserves the database mtime; retention uses backup creation names.
     for old in sorted(backups.glob("agents-*.kdbx"), reverse=True)[KEEP_BACKUPS:]:
         old.unlink()
+
+
+def lock_fd(fd, timeout=30):
+    """Lock an inherited shell descriptor; the shell keeps it open during the write."""
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except BlockingIOError:
+            if time.monotonic() >= deadline:
+                sys.exit("sec: vault is locked by another writer")
+            time.sleep(0.05)
 
 
 def run(vault, args):
@@ -66,7 +80,9 @@ def run(vault, args):
 
 if __name__ == "__main__":
     action, directory, *args = sys.argv[1:]
-    if action == "backup":
+    if action == "lock":
+        lock_fd(int(directory))
+    elif action == "backup":
         backup(Path(directory))
     elif action == "run":
         run(Path(directory), args)
