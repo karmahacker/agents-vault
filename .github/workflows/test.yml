@@ -63,7 +63,7 @@ jobs:
           sec init --no-timer --no-rules --no-import
           sec gen test/retained
           shasum -a 256 "$SEC_VAULT_DIR/agents.kdbx" "$SEC_VAULT_DIR/agents.keyx" "$SEC_CONFIG_DIR/sources.toml" > "$RUNNER_TEMP/vault-before.sha"
-          brew reinstall --HEAD agents-vault/experimental/agents-vault
+          brew reinstall agents-vault/experimental/agents-vault
           shasum -a 256 -c "$RUNNER_TEMP/vault-before.sha"
           sec doctor
           sec ls | grep -q test/retained
