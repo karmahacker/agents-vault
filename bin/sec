@@ -101,21 +101,21 @@ case "$cmd" in
     if [[ $cmd == meta ]]; then
       exists "$entry" || die "meta: no such entry $entry"
       [[ ${#opts[@]} -gt 0 ]] || die "meta: nothing to change"
-      write kp edit "${opts[@]}" "$DB" "$entry" >/dev/null
+      write kp edit ${opts[@]+"${opts[@]}"} "$DB" "$entry" >/dev/null
     elif [[ $cmd == gen ]]; then
       if exists "$entry"; then
-        write kp edit "${opts[@]}" -g -L "$len" -lUn "$DB" "$entry" >/dev/null
+        write kp edit ${opts[@]+"${opts[@]}"} -g -L "$len" -lUn "$DB" "$entry" >/dev/null
       else
         write ensure_groups "$entry"
-        kp add "${opts[@]}" -g -L "$len" -lUn "$DB" "$entry" >/dev/null
+        kp add ${opts[@]+"${opts[@]}"} -g -L "$len" -lUn "$DB" "$entry" >/dev/null
       fi
     else
       val="$(read_value "$entry")"
       if exists "$entry"; then
-        printf '%s\n' "$val" | write kp edit "${opts[@]}" -p "$DB" "$entry" >/dev/null 2>&1
+        printf '%s\n' "$val" | write kp edit ${opts[@]+"${opts[@]}"} -p "$DB" "$entry" >/dev/null 2>&1
       else
         write ensure_groups "$entry"
-        printf '%s\n' "$val" | kp add "${opts[@]}" -p "$DB" "$entry" >/dev/null 2>&1
+        printf '%s\n' "$val" | kp add ${opts[@]+"${opts[@]}"} -p "$DB" "$entry" >/dev/null 2>&1
       fi
     fi
     exists "$entry" || die "$cmd: write failed for $entry"
