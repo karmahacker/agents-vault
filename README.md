@@ -4,15 +4,44 @@ A local, on-prem credential store for AI coding agents (Claude Code, Codex, Gemi
 on an agent server. Agents look up and use passwords, tokens, SSH keys, certificates and whole `.env` files
 themselves instead of asking a human, and save new credentials they create.
 
-- **Storage:** one KeePassXC database (`~/.agents-vault/agents.kdbx`) unlocked by a key file, no password.
-  Plain KDBX 4, so it opens in the KeePassXC app and can be merged with a personal KeePass database.
-- **Access:** `sec`, a small bash wrapper around `keepassxc-cli`, built so secrets reach commands through
-  the environment without being printed.
-- **Population:** `sec import` copies credentials that already exist on the host (dotenv files, SSH keys,
-  cloud CLI logins, kubeconfig, Kubernetes secrets, cloudflared tunnels, ...) into the vault, driven by a
-  TOML file that lists paths only. An hourly systemd timer keeps it in step with the source files.
-- **Agent instructions:** the installer adds a "Secrets (agents vault)" section to each agent's global
-  instruction file, so every agent knows the vault exists and how to use it.
+## What problem does agents-vault solve?
+
+Coding agents need credentials to run applications and work with development services. Those
+credentials are often scattered across `.env` files, SSH keys, CLI configurations, and projects.
+
+agents-vault gives trusted agents one local place to **find, use, save, and update development
+credentials**, reducing repeated requests for secrets and avoiding the need to paste them into chat.
+It uses a local KeePassXC database, so there is no additional secrets server to operate.
+
+## How it works
+
+1. **Store:** credentials live in an encrypted KeePassXC database, unlocked automatically with a
+   local key file. The database uses standard KDBX 4 and opens in the KeePassXC application.
+2. **Import:** a configuration file identifies existing credential sources. The importer copies
+   their contents into the vault without moving or deleting the originals.
+3. **Find and use:** agents search for entries, inspect metadata, and inject credentials into
+   command environments or export attached files. The installer adds instructions to agents'
+   global instruction files so they know how to use the vault.
+4. **Save:** agents store newly created credentials through standard input.
+5. **Update:** an hourly timer refreshes imported entries when their sources change.
+   Manually managed entries remain separate.
+6. **Recover:** writes create backups first; the latest 200 are retained. Keep an off-host copy
+   of both the database and key file for disaster recovery.
+
+**Imported entries follow their source files.** Update the source file to rotate an imported
+credential. For manually managed entries, use `sec set` or `sec gen`. Updating the vault alone
+does not rotate a credential at its service.
+
+For example, an agent can start a development application with its saved environment:
+
+```bash
+sec run @myapp/api-dev -- npm run start:dev
+```
+
+`sec run` avoids printing credentials itself; commands it launches must also avoid logging them.
+This system is for trusted agents on development and lab hosts, with no per-agent permissions or
+read audit log. Anyone with access to both the database and key file can read its contents.
+**Never store production credentials here.**
 
 **This repo contains no credentials, and must never contain any.** See [Repo hygiene](#repo-hygiene).
 
@@ -170,21 +199,28 @@ belong to the tools themselves).
 
 ## Using it (for agents and humans)
 
-```text
-sec ls [group]                       list entry paths (no values)
-sec find <term>                      search titles/notes; notes list each entry's field names
-sec info <entry>                     metadata, field names, attachments; values hidden
-sec get <entry> [field]              print one value (default Password)
-sec run VAR=entry[:field] ... -- cmd run cmd with secrets in its environment
-sec run @entry ... -- cmd            same, loading every var of the entry's .env attachment
-sec set <entry> [-u user] [--url u] [--notes t]   create/update; secret read from STDIN only
-sec meta <entry> [-u user] [--url u] [--notes t]  change metadata, keep the secret
-sec gen <entry> [-u user] [--url u] [-L len]      create/update with a generated password
-sec mv <entry> <group> | sec rm <entry>
-sec file ls|put|get ...              attachments (keys, certs, kubeconfigs, .env files); exports are 0600
-sec backups                          automatic pre-write backups (last 200)
-sec import [--dry-run]               refresh imported entries from sources.toml
-```
+These are `sec` CLI commands, not MCP tools. Run `sec help` for full syntax and options.
+
+| Feature | Command | What it does |
+|---|---|---|
+| Browse | `sec ls [group]` | Lists entry paths without values |
+| Search | `sec find <term>` | Finds matching entries |
+| Inspect | `sec info <entry>` | Shows metadata, field names, and attachments; protected values stay hidden |
+| Read a value | `sec get <entry> [field]` | Prints a value; use only when needed to write a file or configuration |
+| Run with a credential | `sec run VAR=entry[:field] -- cmd` | Supplies a credential through the command's environment |
+| Run with an environment file | `sec run @entry -- cmd` | Loads variables from an attached `.env` file |
+| Save or update | `sec set <entry>` | Creates or updates a password, reading the value from standard input |
+| Edit metadata | `sec meta <entry> ...` | Updates username, URL, or notes without changing the password |
+| Generate a password | `sec gen <entry> [-L length]` | Generates and stores a password |
+| Organize | `sec mv <entry> <group>` | Moves an entry |
+| Remove | `sec rm <entry>` | Moves an entry to the Recycle Bin |
+| List files | `sec file ls <entry>` | Lists attachments |
+| Attach a file | `sec file put <entry> <name> <path>` | Adds or replaces an attachment |
+| Export a file | `sec file get <entry> <name> <out>` | Exports a key, certificate, or other attachment |
+| Refresh imports | `sec import` | Updates entries from configured sources |
+| Preview changes | `sec import --dry-run` | Reports pending changes without updating entries |
+| Find backups | `sec backups` | Lists automatic backups |
+| Command reference | `sec help` | Shows syntax and options |
 
 Examples:
 
