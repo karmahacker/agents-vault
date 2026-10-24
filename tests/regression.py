@@ -133,6 +133,26 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual({p.read_text() for p in (self.vault / "backups").glob("*.kdbx")},
                          {"first", "second"})
 
+    def test_explicit_init_and_doctor_preserve_existing_vault(self):
+        self.env["SEC_CONFIG_DIR"] = str(self.root / "config")
+        self.env["SEC_RESOURCES"] = str(REPO)
+        self.assertIn("sec init", self.sec("help"))
+        self.assertFalse((self.vault / "agents.kdbx").exists())
+        args = ("init", "--no-timer", "--no-rules", "--no-import")
+        self.sec(*args)
+        self.assertIn("ready:", self.sec("doctor"))
+        files = [self.vault / "agents.kdbx", self.vault / "agents.keyx",
+                 self.root / "config/sources.toml"]
+        originals = [p.read_bytes() for p in files]
+        self.sec(*args)
+        self.assertEqual([p.read_bytes() for p in files], originals)
+        (self.vault / "agents.keyx").unlink()
+        failed = subprocess.run([str(REPO / "bin/sec"), *args],
+                                env=self.env, capture_output=True, text=True)
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertEqual(files[0].read_bytes(), originals[0])
+        self.assertFalse(files[1].exists())
+
     def test_shell_retains_lock_after_python_helper_exits(self):
         lock_path = self.vault / ".lock"
         script = 'exec 9>"$1"; python3 "$2" lock 9 || exit; echo ready; read -r done'

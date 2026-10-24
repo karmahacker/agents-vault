@@ -36,3 +36,36 @@ jobs:
         run: |
           ./install.sh --no-system-link --no-rules --no-import
           plutil -lint "$HOME/Library/LaunchAgents/local.agents-vault.import.plist"
+  homebrew:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Dependencies and local tap
+        run: |
+          brew install --cask keepassxc
+          git branch formula-ci HEAD
+          AGENTS_VAULT_SOURCE_URL="file://$GITHUB_WORKSPACE" AGENTS_VAULT_SOURCE_BRANCH=formula-ci ./packaging/homebrew/prepare-tap.sh
+      - name: Install package without configuring user files
+        run: |
+          test ! -e "$HOME/.agents-vault"
+          test ! -e "$HOME/.config/agents-vault"
+          test ! -e "$HOME/AGENTS.md"
+          brew install --HEAD agents-vault/experimental/agents-vault
+          test ! -e "$HOME/.agents-vault"
+          test ! -e "$HOME/.config/agents-vault"
+          test ! -e "$HOME/AGENTS.md"
+          brew test agents-vault/experimental/agents-vault
+      - name: Reinstall preserves user vault and configuration
+        env:
+          SEC_VAULT_DIR: ${{ runner.temp }}/brew-vault
+          SEC_CONFIG_DIR: ${{ runner.temp }}/brew-config
+        run: |
+          sec init --no-timer --no-rules --no-import
+          sec gen test/retained
+          shasum -a 256 "$SEC_VAULT_DIR/agents.kdbx" "$SEC_VAULT_DIR/agents.keyx" "$SEC_CONFIG_DIR/sources.toml" > "$RUNNER_TEMP/vault-before.sha"
+          brew reinstall --HEAD agents-vault/experimental/agents-vault
+          shasum -a 256 -c "$RUNNER_TEMP/vault-before.sha"
+          sec doctor
+          sec ls | grep -q test/retained
+          brew uninstall agents-vault/experimental/agents-vault
+          shasum -a 256 -c "$RUNNER_TEMP/vault-before.sha"

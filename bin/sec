@@ -14,7 +14,12 @@ LIB_DIR="$(dirname "${SEC_IMPORTER:-$HOME/.local/share/agents-vault/import.py}")
 die() { echo "sec: $*" >&2; exit 1; }
 kp()  { keepassxc-cli "$1" --no-password -k "$KEY" "${@:2}"; }
 
-[[ -r $DB && -r $KEY ]] || die "vault not found at $VAULT_DIR"
+case "${1:-help}" in
+  init) shift; exec bash "$LIB_DIR/setup.sh" "$@" ;;
+  doctor) shift; exec python3 "$LIB_DIR/doctor.py" "$@" ;;
+  help|-h|--help) ;;
+  *) [[ -r $DB && -r $KEY ]] || die "vault not found at $VAULT_DIR; run sec init" ;;
+esac
 
 backup() {
   python3 "$LIB_DIR/common.py" backup "$VAULT_DIR"
@@ -52,6 +57,8 @@ read_value() {
 usage() {
   cat <<'U'
 Usage:
+  sec init [options]                  explicitly initialize user vault and configuration
+  sec doctor                          check dependencies, permissions, and vault readability
   sec ls [group]                       list entries (names only, no values)
   sec find <term>                      search entry titles/fields
   sec info <entry>                     metadata, field names, files (values hidden)

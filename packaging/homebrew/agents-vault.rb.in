@@ -1,0 +1,43 @@
+class AgentsVault < Formula
+  desc "Local KeePassXC credential store for coding agents"
+  # Branch-only experiment: supplied explicitly when installing the local test tap.
+  homepage SOURCE_URL
+  head SOURCE_URL, branch: SOURCE_BRANCH
+
+  depends_on :macos
+  depends_on "python@3.12"
+
+  def install
+    libexec.install "lib", "templates", "examples", "systemd"
+    (libexec/"bin").install "bin/sec"
+    (bin/"sec").write <<~SH
+      #!/bin/bash
+      export SEC_IMPORTER="#{opt_libexec}/lib/import.py"
+      export SEC_RESOURCES="#{opt_libexec}"
+      export PATH="#{Formula["python@3.12"].opt_libexec}/bin:#{HOMEBREW_PREFIX}/bin:/Applications/KeePassXC.app/Contents/MacOS:$PATH"
+      exec "#{opt_libexec}/bin/sec" "$@"
+    SH
+  end
+
+  def caveats
+    <<~EOS
+      Experimental HEAD-only package. No user setup runs during installation or upgrade.
+      Install KeePassXC separately: brew install --cask keepassxc
+      Then run: sec init
+      Check readiness: sec doctor
+      The optional MCP server is not bundled in this experimental formula.
+      Existing ~/.local/bin/sec installations may shadow this command; check `type -a sec`.
+    EOS
+  end
+
+  test do
+    ENV["SEC_VAULT_DIR"] = (testpath/"vault").to_s
+    ENV["SEC_CONFIG_DIR"] = (testpath/"config").to_s
+    assert_match "sec init", shell_output("#{bin}/sec help")
+    refute_path_exists testpath/"vault"
+    system bin/"sec", "init", "--no-timer", "--no-rules", "--no-import"
+    assert_match "ready:", shell_output("#{bin}/sec doctor")
+    system bin/"sec", "gen", "test/generated", "-L", "24"
+    assert_match "test/generated", shell_output("#{bin}/sec ls")
+  end
+end

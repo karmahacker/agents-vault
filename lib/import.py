@@ -24,7 +24,7 @@ from common import backup, parse_env
 HOME = Path.home()
 VAULT = Path(os.environ.get("SEC_VAULT_DIR", HOME / ".agents-vault"))
 DB, KEY = VAULT / "agents.kdbx", VAULT / "agents.keyx"
-DEFAULT_CONFIG = Path(os.environ.get("AGENTS_VAULT_SOURCES", HOME / ".config/agents-vault/sources.toml"))
+DEFAULT_CONFIG = Path(os.environ.get("AGENTS_VAULT_SOURCES", Path(os.environ.get("SEC_CONFIG_DIR", HOME / ".config/agents-vault")) / "sources.toml"))
 NS = uuid.UUID("5b7f3c2e-6a1d-4c8e-9f20-a9e5c0d1b2f3")
 STD = ("Title", "UserName", "Password", "URL", "Notes")
 

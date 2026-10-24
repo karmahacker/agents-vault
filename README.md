@@ -77,6 +77,14 @@ read audit log. Anyone with access to both the database and key file can read it
   rules tell agents to use `sec run` (values go into the child process's environment) rather than printing them.
 - **The vault is an index, not the only copy.** The importer copies; it never moves or deletes source files.
 
+## Experimental Homebrew packaging
+
+The `experiment/homebrew-packaging` branch includes an unpublished local tap for testing
+macOS packaging. It separates code installation from explicit `sec init` setup and adds a
+read-only `sec doctor` check. See [the experiment guide](packaging/homebrew/README.md)
+for commands, isolation options, and current limitations. The standard installer below
+continues to install and initialize in one step.
+
 ## Install on Linux or macOS
 
 Requirements: Python >= 3.11 and `keepassxc-cli` >= 2.7. Linux uses a systemd user timer;
