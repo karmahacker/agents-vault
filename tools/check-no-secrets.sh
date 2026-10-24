@@ -112,6 +112,10 @@ for f, text in contents():
     checked += 1
     if any(n in text for n in needles):
         problems.append(f"{f}: contains a value stored in the vault")
+    # Binary payloads (for example PNGs) are not prose: random compressed bytes
+    # can resemble IDs or denylisted words. Vault-value matching above still runs.
+    if "\0" in text:
+        continue
     low = text.lower()
     for t in deny:
         if t in low:
