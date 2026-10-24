@@ -2,7 +2,7 @@ class AgentsVault < Formula
   desc "Local KeePassXC credential store for coding agents"
   # Branch-only experiment: supplied explicitly when installing the local test tap.
   homepage SOURCE_URL
-  head SOURCE_URL, branch: SOURCE_BRANCH
+  head SOURCE_URL, using: :git, branch: SOURCE_BRANCH
 
   depends_on :macos
   depends_on "python@3.12"
