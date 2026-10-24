@@ -50,6 +50,54 @@ themselves instead of asking a human, and save new credentials they create.
 Requirements: Linux with systemd, `sudo`, Python >= 3.11, `keepassxc-cli` >= 2.7 (installed by the script on
 apt systems). Tested on Ubuntu 24.04 with KeePassXC 2.7.6.
 
+### Let a coding agent handle installation
+
+Open your coding agent on the Linux host where the vault should live, under the user account that
+will use it, and paste this prompt. The agent needs terminal access to that host and access to this
+repository: open the session in its checkout, or provide its clone URL with the prompt.
+If administrator authentication is needed, complete it through your terminal or the
+agent's private approval interface; do not paste a password into chat.
+
+```text
+Install or upgrade agents-vault on this host and validate the installed tools.
+Use the agents-vault checkout in this workspace, or clone the repository URL I
+provide. If neither is available, ask me for the clone URL. Read its
+README and applicable agent instructions first. Use main unless I specify another
+branch, and fetch current code without discarding local edits.
+
+Check Linux, Python >= 3.11, keepassxc-cli >= 2.7, flock, and the systemd user
+session. Install missing dependencies using the documented procedure. Preserve
+any existing vault, key file, sources configuration, and unrelated agent rules.
+If an existing vault or key is missing its counterpart, stop and report it rather
+than creating a replacement. Never print credentials or put them in command
+arguments, logs, chat, or the repository.
+
+For a new installation, ask which dev/lab projects or credential files to import
+if I have not identified them. Create sources.toml using the example as a syntax
+reference, with only the selected sources and no literal secrets or placeholder
+sources. Exclude production/staging credentials and coding-agent login files.
+For an upgrade, retain the existing sources and installation preferences.
+
+Run ./install.sh with the appropriate documented flags. Set up the hourly user
+timer and enable linger for this user so imports continue after logout. If the
+host cannot support those steps or required privileges are unavailable, complete
+the independent steps and report exactly what remains incomplete.
+
+Validate with tests/smoke.sh and python3 tests/regression.py (throwaway data).
+Then verify the installed sec resolves to the expected location, run sec help
+and sec ls without displaying values, and run sec import --dry-run. After the
+initial import, expect 0 would change; investigate changes or skipped sources
+instead of treating an exit code alone as success. Check that the user timer is
+enabled and active, linger is enabled, and the installed guide and agent rules
+are present. Confirm the vault directory is mode 0700 and the database and key
+are mode 0600. Do not rotate credentials or contact external services to test them.
+
+Finish with the installed branch and commit, checks passed, any skipped sources,
+and any remaining manual action. Do the installation, not just describe the steps.
+```
+
+### Manual installation
+
 ```bash
 git clone <this repo> agents-vault
 cd agents-vault
