@@ -117,6 +117,9 @@ for f, text in contents():
     if "\0" in text:
         continue
     low = text.lower()
+    # Exempt only whole, explicitly allowlisted public URLs from private-name checks.
+    # Vault-value checks above always inspect the original content.
+    low = re.sub(r"https://[^\s<>\"'`()]+", lambda m: "" if m.group() in allow else m.group(), low)
     for t in deny:
         if t in low:
             problems.append(f"{f}: contains denylisted term #{deny.index(t) + 1}")

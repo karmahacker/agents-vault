@@ -87,54 +87,83 @@ the repository's CI runs CLI and MCP tests on both Linux and macOS.
 
 ### Let a coding agent handle installation
 
-Open your coding agent on the Linux or macOS host where the vault should live, under the user account that
-will use it, and paste this prompt. The agent needs terminal access to that host and access to this
-repository: open the session in its checkout, or provide its clone URL with the prompt.
-If administrator authentication is needed, complete it through your terminal or the
-agent's private approval interface; do not paste a password into chat.
+**Copy this one prompt into your coding agent.** No checkout, separate setup commands, or edits
+to the prompt are required. Run the agent on the target Linux or macOS host as the user who will
+own the vault, with terminal and network access. The manual instructions below are an optional
+reference, not extra steps you need to perform.
 
 ```text
-Install or upgrade agents-vault on this host and validate the installed tools.
-Use the agents-vault checkout in this workspace, or clone the repository URL I
-provide. If neither is available, ask me for the clone URL. Read its
-README and applicable agent instructions first. Use main unless I specify another
-branch, and fetch current code without discarding local edits.
+Install or upgrade agents-vault on this host. Perform the work end to end and
+validate the installed tools; do not just give me commands or a plan.
 
-Check the OS, Python >= 3.11, and keepassxc-cli >= 2.7. On Linux check the
-systemd user session; on macOS check Homebrew and the graphical login session. Install missing dependencies using the documented procedure. Preserve
-any existing vault, key file, sources configuration, and unrelated agent rules.
-If an existing vault or key is missing its counterpart, stop and report it rather
-than creating a replacement. Never print credentials or put them in command
-arguments, logs, chat, or the repository.
+Repository: https://github.com/karmahacker/agents-vault.git
+Branch: main
 
-For a new installation, ask which dev/lab projects or credential files to import
-if I have not identified them. Create sources.toml using the example as a syntax
-reference, with only the selected sources and no literal secrets or placeholder
-sources. Exclude production/staging credentials and coding-agent login files.
-For an upgrade, retain the existing sources and installation preferences.
+1. Obtain the code. Reuse a checkout of this repository if available; otherwise
+   clone the URL above into a suitable user-owned directory and enter it.
+   Fetch current main. Preserve local edits and commits; use a separate checkout
+   if updating the existing one would overwrite work. Read the repository README
+   and applicable agent instructions before running installation commands.
 
-Run ./install.sh with the appropriate documented flags. Set up the hourly user
-schedule: use systemd and enable linger on Linux; use a launchd LaunchAgent
-on macOS. Mac imports run only while logged in and awake. If the host cannot support those steps or required privileges are unavailable, complete
-the independent steps and report exactly what remains incomplete.
+2. Check prerequisites. Detect Linux or macOS and ensure Git, Python >= 3.11,
+   and keepassxc-cli >= 2.7 are available. Install missing dependencies using
+   the documented OS procedure. On macOS, install Homebrew from its official
+   source if needed. Use available privileges; if authentication or an OS
+   approval is required, request it through the terminal/private approval UI,
+   never by asking me to paste a password into chat. Do not bypass access controls.
 
-Validate with tests/smoke.sh and python3 tests/regression.py (throwaway data).
-Then verify the installed sec resolves to the expected location, run sec help
-and sec ls without displaying values, and run sec import --dry-run. After the
-initial import, expect 0 would change; investigate changes or skipped sources
-instead of treating an exit code alone as success. Check that the user timer is
-enabled and active on Linux (with linger), or the LaunchAgent is loaded on
-macOS. Check that the installed guide and agent rules are present. Confirm the vault directory is mode 0700 and the database and key
-are mode 0600. Do not rotate credentials or contact external services to test them.
+3. Preserve existing data. Inspect whether this is a new installation or an
+   upgrade. Keep the existing vault, key file, sources configuration, installation
+   preferences, and unrelated agent rules. If a database or key exists without
+   its counterpart, stop vault setup and report what needs restoring. Never
+   replace it with a fresh vault. Never print credentials or put them in command
+   arguments, logs, chat, or the repository.
 
-Finish with the installed branch and commit, checks passed, any skipped sources,
-and any remaining manual action. Do the installation, not just describe the steps.
+4. Configure sources without blocking installation. On upgrades retain the
+   existing sources. On a new installation, import only dev/lab sources I have
+   explicitly identified in this conversation. If none are identified, create
+   an empty valid ~/.config/agents-vault/sources.toml with mode 0600, inside a
+   mode 0700 directory, and finish installing an empty usable vault. Do not ask
+   me to select projects just to complete installation, scan the whole host for
+   secrets, or copy the example's placeholder sources into live configuration.
+   Use the example only as a syntax reference. Exclude production/staging
+   credentials and coding-agent login files. Store no literal secrets in TOML.
+
+5. Install and configure. Run ./install.sh with flags appropriate to the existing
+   installation. Keep the CLI as the default; preserve an existing MCP setup,
+   and use --with-mcp only if I requested MCP or it is already installed. For
+   requested MCP, configure the current client's local stdio server if its
+   documented configuration is available, preserving unrelated settings.
+   Set up hourly imports using the systemd user timer and linger on Linux,
+   or the per-user LaunchAgent on macOS. Mac imports pause while logged out or
+   asleep. Ensure sec is accessible to this agent; use its absolute installed
+   path if PATH does not include it. Install the guide and supported agent rules.
+
+6. Validate. Run tests/smoke.sh and python3 tests/regression.py against throwaway
+   data. Verify the installed command's location, run sec help and sec ls without
+   displaying values, then run sec import --dry-run. Expect 0 would change after
+   importing configured sources; investigate changes and skipped-source warnings
+   rather than relying only on exit codes. An intentionally empty sources file
+   is valid: report that no credentials have been imported yet. Verify vault
+   directory mode 0700, database/key modes 0600, and the installed guide and agent
+   rules. Check the enabled/active systemd timer and linger on Linux, or the loaded
+   LaunchAgent on macOS. If MCP is installed, run its documented integration test
+   using the MCP venv. Do not rotate credentials or contact services to test them.
+
+Complete all steps that the host permits. Ask for input only for a real blocker
+such as required privileges, restoring an incomplete vault, or resolving an
+ambiguous existing setup. If a scheduler, client reload, or another step cannot
+be completed, report it precisely; do not claim it passed.
+
+Finish with the installed branch and commit, command location, checks passed,
+scheduler/MCP status, imported or skipped sources, and any genuinely remaining
+action. Do not leave routine installation or validation commands for me to run.
 ```
 
 ### Manual installation
 
 ```bash
-git clone <this repo> agents-vault
+git clone --branch main https://github.com/karmahacker/agents-vault.git agents-vault
 cd agents-vault
 
 # 1. Describe what to import (paths only, never values). Start from the example:

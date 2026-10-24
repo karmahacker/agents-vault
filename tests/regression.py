@@ -73,6 +73,32 @@ class RegressionTests(unittest.TestCase):
         self.command("git", "rm", "--cached", "sample.txt", cwd=repo)
         self.command(str(REPO / "tools/check-no-secrets.sh"), cwd=repo)
 
+    def test_public_url_exception_does_not_exempt_names_or_vault_values(self):
+        repo = self.root / "repo"
+        repo.mkdir()
+        self.command("git", "init", "-q", str(repo))
+        (repo / "tools").mkdir()
+        url = "https://example.test/public-owner-fixture/project.git"
+        (repo / "tools/allowlist.txt").write_text(url + "\n")
+        deny = self.root / "denylist.txt"
+        deny.write_text("public-owner-fixture\n")
+        self.env["AGENTS_VAULT_DENYLIST"] = str(deny)
+        readme = repo / "README.md"
+        readme.write_text(url + "\n")
+        self.command(str(REPO / "tools/check-no-secrets.sh"), cwd=repo)
+        for text in ("public-owner-fixture", url + "/private"):
+            readme.write_text(text)
+            result = subprocess.run([str(REPO / "tools/check-no-secrets.sh")],
+                                    cwd=repo, env=self.env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 1)
+        readme.write_text(url + "\n")
+        self.create_vault()
+        self.command(str(REPO / "bin/sec"), "set", "test/value", input=url)
+        result = subprocess.run([str(REPO / "tools/check-no-secrets.sh")],
+                                cwd=repo, env=self.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("contains a value stored in the vault", result.stdout)
+
     def test_binary_data_does_not_trigger_text_heuristics(self):
         repo = self.root / "repo"
         repo.mkdir()

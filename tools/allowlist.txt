@@ -1,3 +1,6 @@
-# Strings check-no-secrets.sh may accept although they look like ids (one per line).
+# Public IDs or complete HTTPS URLs accepted by check-no-secrets.sh (one per line).
 # UUID namespace used by lib/import.py to derive stable entry UUIDs (random constant, not an identifier).
 5b7f3c2e-6a1d-4c8e-9f20-a9e5c0d1b2f3
+
+# Public upstream clone URL; its owner name is intentionally public in installation docs.
+https://github.com/karmahacker/agents-vault.git
