@@ -15,10 +15,11 @@ Usage: import.py [--dry-run] [--config PATH]
   config: $AGENTS_VAULT_SOURCES or ~/.config/agents-vault/sources.toml
   vault:  $SEC_VAULT_DIR or ~/.agents-vault
 """
-import argparse, base64, calendar, configparser, fcntl, gzip, json, os, re, shutil
+import argparse, base64, calendar, configparser, fcntl, gzip, json, os, re
 import subprocess, sys, tempfile, time, tomllib, uuid
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from common import backup, parse_env
 
 HOME = Path.home()
 VAULT = Path(os.environ.get("SEC_VAULT_DIR", HOME / ".agents-vault"))
@@ -49,19 +50,6 @@ def b64uuid(u):
     return base64.b64encode(u.bytes).decode()
 
 
-def parse_env(text):
-    out = {}
-    for line in text.splitlines():
-        m = re.match(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$", line)
-        if not m:
-            continue
-        v = m.group(2).strip()
-        if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
-            v = v[1:-1]
-        out[m.group(1)] = v
-    return out
-
-
 def is_secret(name, value, extra=()):
     if not value:
         return False
@@ -74,8 +62,7 @@ class Vault:
     """Collects entries, then writes only new/changed ones into the vault."""
 
     def __init__(self):
-        self.entries, self.report = {}, []
-        self.groups, self.existing = self._read_existing()
+        self.entries = {}
 
     def _read_existing(self):
         r = kpcli("export", "--no-password", "-k", str(KEY), "-f", "xml", str(DB))
@@ -112,7 +99,6 @@ class Vault:
                    "Password": password or "", "URL": url or "", "Notes": notes or ""}
         strings.update(fields or {})
         self.entries[path] = (strings, dict(files or {}))
-        self.report.append((path, sorted(fields or {}), sorted(files or {}), bool(password)))
 
     def changes(self):
         out = {}
@@ -347,23 +333,26 @@ def main():
     if unknown:
         sys.exit(f"unknown source types in {args.config}: {', '.join(sorted(unknown))}")
 
-    lock = open(VAULT / ".lock", "w")
-    fcntl.flock(lock, fcntl.LOCK_EX)
     v = Vault()
     for kind, items in cfg.items():
         for item in items:
             SOURCES[kind](v, item)
-    changes = v.changes()
-    if changes and not args.dry_run:
-        shutil.copy2(DB, VAULT / "backups" / f"agents-{time.strftime('%Y%m%d-%H%M%S')}-preimport.kdbx")
-        v.write(changes)
-    for path, fields, files, pw in v.report:
-        if path in changes:
-            bits = (["password"] if pw else []) + ([f"{len(fields)} fields: {' '.join(fields)}"] if fields else []) \
-                + ([f"files: {' '.join(files)}"] if files else [])
-            print(f"{changes[path]:8} {path:40} {'; '.join(bits)}")
+    with open(VAULT / ".lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        v.groups, v.existing = v._read_existing()
+        changes = v.changes()
+        if changes and not args.dry_run:
+            backup(VAULT)
+            v.write(changes)
+    for path, change in changes.items():
+        strings, attachments = v.entries[path]
+        fields = sorted(set(strings) - set(STD))
+        files = sorted(attachments)
+        bits = (["password"] if strings["Password"] else []) + ([f"{len(fields)} fields: {' '.join(fields)}"] if fields else []) \
+            + ([f"files: {' '.join(files)}"] if files else [])
+        print(f"{change:8} {path:40} {'; '.join(bits)}")
     verb = "would change" if args.dry_run else "new/updated"
-    print(f"{len(changes)} {verb}, {len(v.report) - len(changes)} unchanged")
+    print(f"{len(changes)} {verb}, {len(v.entries) - len(changes)} unchanged")
 
 
 if __name__ == "__main__":

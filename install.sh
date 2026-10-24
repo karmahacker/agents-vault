@@ -49,6 +49,7 @@ step "scripts"
 install -d -m 755 "$BIN_DIR" "$SHARE_DIR"
 install -m 755 "$REPO/bin/sec" "$BIN_DIR/sec"
 install -m 755 "$REPO/lib/import.py" "$SHARE_DIR/import.py"
+install -m 644 "$REPO/lib/common.py" "$SHARE_DIR/common.py"
 echo "sec -> $BIN_DIR/sec, importer -> $SHARE_DIR/import.py"
 if [[ $SYSLINK == 1 ]]; then
   # Agents often run non-login shells whose PATH lacks ~/.local/bin.
@@ -65,10 +66,13 @@ else
   echo "created $VAULT_DIR/agents.kdbx with new key file agents.keyx"
 fi
 chmod 600 "$VAULT_DIR"/agents.kdbx "$VAULT_DIR"/agents.keyx
-if [[ ! -e $VAULT_DIR/README.md ]]; then
-  install -m 600 "$REPO/templates/vault-README.md" "$VAULT_DIR/README.md"
-  echo "wrote $VAULT_DIR/README.md"
+if [[ -e $VAULT_DIR/README.md ]] && ! cmp -s "$REPO/templates/vault-README.md" "$VAULT_DIR/README.md"; then
+  guide_backup="$(mktemp "$VAULT_DIR/README.md.previous.XXXXXX")"
+  install -m 600 "$VAULT_DIR/README.md" "$guide_backup"
+  echo "saved previous guide: $guide_backup"
 fi
+install -m 600 "$REPO/templates/vault-README.md" "$VAULT_DIR/README.md"
+echo "updated $VAULT_DIR/README.md"
 
 step "sources"
 install -d -m 700 "$CONF_DIR"

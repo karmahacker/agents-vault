@@ -22,6 +22,7 @@ themselves instead of asking a human, and save new credentials they create.
 |---|---|
 | `install.sh` | installs/upgrades everything on a host (idempotent, never replaces an existing vault) |
 | `bin/sec` | the CLI agents use |
+| `lib/common.py` | shared dotenv parser, command environment, and backup retention |
 | `lib/import.py` | the importer behind `sec import` (stdlib Python >= 3.11 + keepassxc-cli) |
 | `examples/sources.example.toml` | every source type, documented |
 | `templates/agent-rule.md` | the section added to CLAUDE.md / AGENTS.md / GEMINI.md |
@@ -75,7 +76,33 @@ Then check that a fresh agent uses it without help, e.g.
 
 Installer flags: `--sources FILE` (install FILE as sources.toml if none exists), `--no-system-link`,
 `--no-timer`, `--no-rules`, `--no-import`. Re-running `./install.sh` after `git pull` upgrades `sec` and the
-importer in place and refreshes the agent rules. It never touches an existing vault, key file or sources file.
+importer in place and refreshes the agent rules and installed guide. It preserves the existing database,
+key file and sources configuration; the default import can update imported entries.
+
+### Updating an installed version
+
+From your existing checkout, pull the branch you want to install and rerun the installer:
+
+```bash
+cd /path/to/agents-vault
+git switch main
+git pull --ff-only
+./install.sh
+```
+
+The repository currently uses `main`. If your team adds a `dev` branch and you want its changes,
+use `git switch dev` instead. Commit or stash local edits before switching branches.
+Pulling code alone does not update the installed copy.
+
+The installer updates `~/.local/bin/sec`, the Python files in `~/.local/share/agents-vault`,
+agent rules, the installed guide, and (when enabled) the systemd units. A differing installed guide
+is saved as `~/.agents-vault/README.md.previous.*` before replacement, preserving local notes.
+The existing vault, key, and sources configuration are retained. Imported entries refresh by default;
+to update software without importing, use `./install.sh --no-import`. Reuse flags such as
+`--no-timer`, `--no-rules`, or `--no-system-link` if they were part of your original setup.
+
+Verify the checkout with `tests/smoke.sh` and `python3 tests/regression.py`, then check the installed
+command with `sec help` and `sec import --dry-run`. Tests use temporary data, not the real vault.
 
 ### Finding what to import on a host
 
@@ -124,6 +151,14 @@ Entry conventions: `<project>/<service>-<env>` for env bundles (secret vars as f
 attachment `.env`); `ssh/<host>` for keys (URL `ssh://user@host`); API tokens also carry the env-var name
 they are used under as a field (`CLOUDFLARE_API_TOKEN`, `GH_TOKEN`, `AWS_ACCESS_KEY_ID`, ...).
 
+### Supported dotenv syntax
+
+Import and `sec run @entry` use the same parser: one `NAME=value` assignment per line, optional
+`export`, surrounding whitespace trimmed, and matching single or double quotes removed. Values
+inside quotes retain their whitespace. Duplicate names use the last assignment; blank lines, comments,
+and other non-assignment lines are ignored. Inline `#` characters are literal. Variable expansion,
+escape decoding, and multiline values are not supported; the file is never executed as shell code.
+
 ## The importer
 
 `sec import` reads `~/.config/agents-vault/sources.toml` (override with `AGENTS_VAULT_SOURCES` or `--config`).
@@ -154,8 +189,8 @@ How it behaves:
 ## Operations
 
 - **Backups.** Every `sec` write and every import that changes something first copies the vault to
-  `~/.agents-vault/backups/`. Restore by copying a backup over `agents.kdbx`. All of these sit on the
-  same disk as the vault, so also keep an off-host copy of `agents.kdbx` **and** `agents.keyx` (e.g.
+  `~/.agents-vault/backups/`. Both write paths keep the latest 200 backup files.
+  Restore by copying a backup over `agents.kdbx`. All of these sit on the same disk as the vault, so also keep an off-host copy of `agents.kdbx` **and** `agents.keyx` (e.g.
   `scp` to a workstation). Without the key file the vault cannot be opened.
 - **Opening in the KeePassXC app.** File > Open `agents.kdbx`, leave the password empty, choose
   `agents.keyx` as the key file.
@@ -196,7 +231,8 @@ How it behaves:
 - Sources files contain paths and names only; a literal password has no supported syntax, on purpose.
   Credentials with no file on the host go in by hand with `sec set`.
 - Before every commit, run `tools/check-no-secrets.sh`, or install it once as a hook:
-  `ln -s ../../tools/check-no-secrets.sh .git/hooks/pre-commit`. It fails if a tracked or staged file contains
+  `ln -s ../../tools/check-no-secrets.sh .git/hooks/pre-commit`. It scans staged blobs as well as tracked
+  and untracked, non-ignored working files, and fails if either version contains
   - any value stored in the local vault (passwords, fields, key/cert lines);
   - an IPv4 address outside loopback, private and documentation ranges, a 12-digit number (AWS account id),
     a 32-hex id or a UUID, unless listed in `tools/allowlist.txt`;

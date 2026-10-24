@@ -7,8 +7,7 @@ set -euo pipefail
 VAULT_DIR="${SEC_VAULT_DIR:-$HOME/.agents-vault}"
 DB="$VAULT_DIR/agents.kdbx"
 KEY="$VAULT_DIR/agents.keyx"
-BACKUPS="$VAULT_DIR/backups"
-KEEP_BACKUPS=200
+LIB_DIR="$(dirname "${SEC_IMPORTER:-$HOME/.local/share/agents-vault/import.py}")"
 
 die() { echo "sec: $*" >&2; exit 1; }
 kp()  { keepassxc-cli "$1" --no-password -k "$KEY" "${@:2}"; }
@@ -16,8 +15,7 @@ kp()  { keepassxc-cli "$1" --no-password -k "$KEY" "${@:2}"; }
 [[ -r $DB && -r $KEY ]] || die "vault not found at $VAULT_DIR"
 
 backup() {
-  cp -p "$DB" "$BACKUPS/agents-$(date +%Y%m%d-%H%M%S-%N).kdbx"
-  ls -1t "$BACKUPS"/agents-*.kdbx | tail -n +$((KEEP_BACKUPS + 1)) | xargs -r rm -f
+  python3 "$LIB_DIR/common.py" backup "$VAULT_DIR"
 }
 
 # Run a mutating command under an exclusive lock, after a backup.
@@ -83,33 +81,7 @@ case "$cmd" in
   info)  [[ $# -ge 1 ]] || die "info <entry>"; kp show --all --show-attachments "$DB" "$1" ;;
   get)   [[ $# -ge 1 ]] || die "get <entry> [attr]"; kp show -a "${2:-Password}" "$DB" "$1" ;;
 
-  run)
-    envs=()
-    while [[ $# -gt 0 && $1 != -- ]]; do
-      if [[ $1 == @* ]]; then
-        # Load every VAR=value from the entry's .env attachment.
-        tmp="$(mktemp "$VAULT_DIR/.envXXXXXX")"
-        if ! kp attachment-export --stdout "$DB" "${1#@}" .env >"$tmp" 2>/dev/null; then
-          rm -f "$tmp"; die "run: $1 has no .env attachment"
-        fi
-        while IFS= read -r line || [[ -n $line ]]; do
-          [[ $line =~ ^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]] || continue
-          k="${BASH_REMATCH[2]}" v="${BASH_REMATCH[3]}"
-          if [[ $v =~ ^\"(.*)\"[[:space:]]*$ || $v =~ ^\'(.*)\'[[:space:]]*$ ]]; then v="${BASH_REMATCH[1]}"; fi
-          envs+=("$k=$v")
-        done <"$tmp"
-        rm -f "$tmp"; shift; continue
-      fi
-      [[ $1 == *=* ]] || die "run: expected VAR=entry[:attr] or @entry, got '$1'"
-      var="${1%%=*}" ref="${1#*=}" attr=Password
-      [[ $ref == *:* ]] && { attr="${ref##*:}"; ref="${ref%:*}"; }
-      val="$(kp show -a "$attr" "$DB" "$ref")" || die "run: cannot read $ref:$attr"
-      envs+=("$var=$val"); shift
-    done
-    [[ ${1:-} == -- ]] && shift
-    [[ $# -ge 1 ]] || die "run: missing command after --"
-    exec env "${envs[@]}" "$@"
-    ;;
+  run) exec python3 "$LIB_DIR/common.py" run "$VAULT_DIR" "$@" ;;
 
   set|gen|meta)
     [[ $# -ge 1 ]] || die "$cmd <entry> [options]"

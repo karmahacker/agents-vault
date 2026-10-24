@@ -10,3 +10,6 @@
 backups/
 sources.toml
 !examples/*.toml
+
+# Python runtime cache.
+__pycache__/
