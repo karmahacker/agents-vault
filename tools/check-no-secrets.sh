@@ -75,16 +75,41 @@ ID_PATTERNS = [
 ]
 IPV4 = re.compile(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])")
 
-files = [f for f in subprocess.run(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
-                                   capture_output=True).stdout.decode().split("\0") if f]
+def git_files(*args):
+    return [os.fsdecode(f) for f in subprocess.run(
+        ["git", "ls-files", "-z", *args], capture_output=True, check=True
+    ).stdout.split(b"\0") if f]
+
+
+def contents():
+    # Inspect index blobs even when the working copy was edited or removed after staging.
+    index = subprocess.run(["git", "ls-files", "--stage", "-z"],
+                           capture_output=True, check=True).stdout
+    for record in index.split(b"\0"):
+        if not record:
+            continue
+        metadata, name = record.split(b"\t", 1)
+        mode, oid, stage = metadata.split()
+        f = os.fsdecode(name)
+        if f == "tools/allowlist.txt" or mode == b"160000":
+            continue
+        blob = subprocess.run(["git", "cat-file", "blob", oid.decode()],
+                              capture_output=True, check=True).stdout
+        yield f + " (staged)", blob.decode(errors="ignore")
+    for f in git_files("--cached", "--others", "--exclude-standard"):
+        if f == "tools/allowlist.txt":
+            continue
+        try:
+            with open(f, errors="ignore") as source:
+                yield f, source.read()
+        except (IsADirectoryError, FileNotFoundError):
+            continue
+
+
 problems = []
-for f in files:
-    if f == "tools/allowlist.txt":
-        continue
-    try:
-        text = open(f, errors="ignore").read()
-    except (IsADirectoryError, FileNotFoundError):
-        continue
+checked = 0
+for f, text in contents():
+    checked += 1
     if any(n in text for n in needles):
         problems.append(f"{f}: contains a value stored in the vault")
     low = text.lower()
@@ -101,6 +126,6 @@ for f in files:
 
 for p in problems:
     print("BLOCKED", p)
-print(f"check-no-secrets: {len(files)} files; {len(needles)} vault values, {len(deny)} denylist terms checked")
+print(f"check-no-secrets: {checked} file versions; {len(needles)} vault values, {len(deny)} denylist terms checked")
 sys.exit(1 if problems else 0)
 PY

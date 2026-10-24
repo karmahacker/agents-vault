@@ -19,7 +19,7 @@ cat >"$T/app.env" <<'E'
 NODE_ENV=development
 DB_PASSWORD="p@ss word"
 JWT_SECRET=jwt123
-DATABASE_URL=postgres://app:pw@db:5432/app
+DATABASE_URL=mysql://fixture_user:fixture_password@db.example.test:3306/fixture_db
 PUBLIC_URL=https://example.com
 TOKEN_TTL=3600
 E
@@ -46,7 +46,7 @@ grep -q "tok-abc\|jwt123\|p@ss" <<<"$out" && fail "import printed a secret value
 out="$(sec import)"; grep -q "0 new/updated, 3 unchanged" <<<"$out" || fail "re-import: $out"; ok "re-import is a no-op"
 
 eq "$(sec get app/api-dev DB_PASSWORD)" "p@ss word" "env secret field (quoted value)"
-eq "$(sec get app/api-dev DATABASE_URL)" "postgres://app:pw@db:5432/app" "credential URL detected"
+eq "$(sec get app/api-dev DATABASE_URL)" "mysql://fixture_user:fixture_password@db.example.test:3306/fixture_db" "credential URL detected"
 sec info app/api-dev | grep -q "^NODE_ENV:" && fail "non-secret var stored as field"; ok "non-secret vars not stored"
 sec info app/api-dev | grep -q "^TOKEN_TTL:" && fail "TTL var stored"; ok "TTL var not stored"
 sec info app/api-dev | grep -q "p@ss" && fail "info leaked a value"; ok "info hides values"

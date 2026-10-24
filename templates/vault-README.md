@@ -37,3 +37,11 @@ URL `ssh://user@host`; API tokens keep the env-var name they are used under as a
   never edit those entries by hand. Everything else is hand/agent-managed and never overwritten.
 - Every write is backed up first (`sec backups`, last 200 kept in ~/.agents-vault/backups).
 - Open in the KeePassXC GUI with key file agents.keyx and an empty password.
+
+## Updating the installed tools
+From the repository checkout, run `git switch main`, `git pull --ff-only`, then `./install.sh`.
+Use `dev` instead of `main` if that branch exists and is the version you want to install.
+Use `./install.sh --no-import` to update software without refreshing imported entries; reuse any
+original `--no-timer`, `--no-rules`, or `--no-system-link` flags. The installer retains the vault,
+key and sources configuration, refreshes this guide, and saves a differing previous guide as
+`README.md.previous.*`. Pulling the repository alone does not update the installed tools.
