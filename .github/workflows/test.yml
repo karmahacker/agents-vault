@@ -30,6 +30,13 @@ jobs:
       - name: Installed tools and MCP tests
         run: |
           "$HOME/.local/bin/sec" help
+          python3 - <<'PYTHON'
+          import pathlib, stat, tomllib
+          config = pathlib.Path.home() / ".config/agents-vault/sources.toml"
+          assert tomllib.loads(config.read_text()) == {}, "default sources must be empty"
+          assert stat.S_IMODE(config.stat().st_mode) == 0o600
+          PYTHON
+          "$HOME/.local/bin/sec" import --dry-run
           "$HOME/.local/share/agents-vault/mcp-venv/bin/python" tests/mcp_integration.py
       - name: Generate and validate macOS scheduler configuration
         if: runner.os == 'macOS'

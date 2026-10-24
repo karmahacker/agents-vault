@@ -13,6 +13,12 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+# Match the installer's macOS dependency discovery without replacing the caller's Python.
+if sys.platform == "darwin":
+    os.environ["PATH"] = os.environ.get("PATH", "") + (
+        ":/opt/homebrew/bin:/usr/local/bin:/Applications/KeePassXC.app/Contents/MacOS"
+    )
+
 sys.dont_write_bytecode = True
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "lib"))

@@ -99,14 +99,20 @@ validate the installed tools; do not just give me commands or a plan.
 Repository: https://github.com/karmahacker/agents-vault.git
 Branch: main
 
-1. Obtain the code. Reuse a checkout of this repository if available; otherwise
-   clone the URL above into a suitable user-owned directory and enter it.
+1. Obtain the code. Check the current workspace and conventional project
+   directories for a matching checkout; do not search the whole home directory
+   or claim none exists outside the paths checked. Otherwise clone the URL above
+   into a suitable user-owned directory and enter it.
    Fetch current main. Preserve local edits and commits; use a separate checkout
    if updating the existing one would overwrite work. Read the repository README
    and applicable agent instructions before running installation commands.
 
 2. Check prerequisites. Detect Linux or macOS and ensure Git, Python >= 3.11,
-   and keepassxc-cli >= 2.7 are available. Install missing dependencies using
+   and keepassxc-cli >= 2.7 are available. On macOS, check the installed
+   /Applications/KeePassXC.app/Contents/MacOS/keepassxc-cli as well as PATH.
+   Add its directory and the selected Python directory to this shell's PATH
+   before validation; the installer cannot change its parent shell's environment.
+   Reuse compatible installed dependencies. Install missing dependencies using
    the documented OS procedure. On macOS, install Homebrew from its official
    source if needed. Use available privileges; if authentication or an OS
    approval is required, request it through the terminal/private approval UI,
@@ -114,7 +120,10 @@ Branch: main
 
 3. Preserve existing data. Inspect whether this is a new installation or an
    upgrade. Keep the existing vault, key file, sources configuration, installation
-   preferences, and unrelated agent rules. If a database or key exists without
+   preferences, and unrelated agent rules. A vault can exist without installed
+   commands or a checkout: treat this as a partial installation and retain it.
+   Do not infer vault contents or validity from file size; verify access with
+   a names-only listing. If a database or key exists without
    its counterpart, stop vault setup and report what needs restoring. Never
    replace it with a fresh vault. Never print credentials or put them in command
    arguments, logs, chat, or the repository.
@@ -122,8 +131,10 @@ Branch: main
 4. Configure sources without blocking installation. On upgrades retain the
    existing sources. On a new installation, import only dev/lab sources I have
    explicitly identified in this conversation. If none are identified, create
-   an empty valid ~/.config/agents-vault/sources.toml with mode 0600, inside a
-   mode 0700 directory, and finish installing an empty usable vault. Do not ask
+   an empty sources configuration (the installer does this by default) and
+   finish installing a usable vault without importing anything. Preserve any
+   existing entries. Verify ~/.config/agents-vault/sources.toml is mode 0600
+   inside a mode 0700 directory. Do not ask
    me to select projects just to complete installation, scan the whole host for
    secrets, or copy the example's placeholder sources into live configuration.
    Use the example only as a syntax reference. Exclude production/staging
@@ -140,14 +151,20 @@ Branch: main
    path if PATH does not include it. Install the guide and supported agent rules.
 
 6. Validate. Run tests/smoke.sh and python3 tests/regression.py against throwaway
-   data. Verify the installed command's location, run sec help and sec ls without
+   data, checking each command's exit status directly; do not hide failures
+   behind a pipe to tail. Verify the installed command's location, then run
+   sec help and sec ls without
    displaying values, then run sec import --dry-run. Expect 0 would change after
    importing configured sources; investigate changes and skipped-source warnings
    rather than relying only on exit codes. An intentionally empty sources file
-   is valid: report that no credentials have been imported yet. Verify vault
+   is valid: report that this run imported no credentials. Verify vault
    directory mode 0700, database/key modes 0600, and the installed guide and agent
    rules. Check the enabled/active systemd timer and linger on Linux, or the loaded
-   LaunchAgent on macOS. If MCP is installed, run its documented integration test
+   LaunchAgent on macOS. After the configured sources have been imported, trigger
+   the LaunchAgent once with launchctl kickstart, wait for that run to finish,
+   and check its exit status and import logs locally without exposing secrets.
+   A loaded job alone does not prove imports work. If MCP is installed, run its
+   documented integration test
    using the MCP venv. Do not rotate credentials or contact services to test them.
 
 Complete all steps that the host permits. Ask for input only for a real blocker
@@ -166,10 +183,10 @@ action. Do not leave routine installation or validation commands for me to run.
 git clone --branch main https://github.com/karmahacker/agents-vault.git agents-vault
 cd agents-vault
 
-# 1. Describe what to import (paths only, never values). Start from the example:
-mkdir -p ~/.config/agents-vault
-cp examples/sources.example.toml ~/.config/agents-vault/sources.toml
-$EDITOR ~/.config/agents-vault/sources.toml     # rebuilding a host? restore its copy kept in the vault
+# 1. Optional: prepare a sources file with only your selected dev/lab sources.
+# Use examples/sources.example.toml as a syntax reference, not live configuration.
+# Pass --sources /path/to/your/sources.toml below on a new installation.
+# Without it, the installer creates an empty config; existing configs are kept.
 
 # 2. Install: deps, sec, importer, vault + key file, hourly timer, agent rules, first import.
 ./install.sh
@@ -180,12 +197,15 @@ if [ "$(uname -s)" = Linux ]; then sudo loginctl enable-linger "$USER"; fi
 
 # 4. Verify.
 tests/smoke.sh                 # throwaway vault, touches nothing real
+python3 tests/regression.py
 sec ls                         # what got imported
 sec import --dry-run           # should say "0 would change"
 ```
 
-Then check that a fresh agent uses it without help, e.g.
-`claude -p "Find our Cloudflare DNS token and check it works with a read-only API call; don't show it."`.
+Then check that a fresh agent can locate the installed guide and list entry names with
+`sec ls`, without displaying values or contacting external services. With no configured
+sources, an empty listing and `0 would change` are expected; installation is complete,
+but no credentials have been imported.
 
 Installer flags: `--sources FILE` (install FILE as sources.toml if none exists), `--no-system-link`,
 `--no-timer`, `--no-rules`, `--no-import`, `--with-mcp`. Re-running `./install.sh` after `git pull` upgrades `sec` and the
@@ -213,7 +233,19 @@ On macOS, installation defaults to user-local commands in `~/.local/bin`, withou
 symlink or `sudo`. Add that directory to your shell's PATH, or invoke `~/.local/bin/sec` directly.
 The installer saves the Python and KeePassXC directories in a private `runtime.sh` alongside
 the installed scripts so GUI-launched agents can find them. Rerun installation if those
-applications move. MCP clients use `/Users/your-user/.local/bin/sec-mcp` as their command.
+applications move. This file affects installed commands, not the shell that launched
+`install.sh`. The test suites discover the standard macOS app and Homebrew CLI paths
+themselves, but the shell must still select Python >= 3.11. If a manual check reports
+`keepassxc-cli: command not found`, set the current shell's PATH before retrying:
+
+```bash
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH:/Applications/KeePassXC.app/Contents/MacOS"
+command -v python3 keepassxc-cli sec
+python3 --version
+keepassxc-cli --version
+```
+
+MCP clients use `/Users/your-user/.local/bin/sec-mcp` as their command.
 
 Hourly imports use `~/Library/LaunchAgents/local.agents-vault.import.plist`, with absolute
 program paths and the selected vault and sources paths. The installer loads it in your GUI
