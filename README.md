@@ -53,6 +53,7 @@ read audit log. Anyone with access to both the database and key file can read it
 |---|---|
 | `install.sh` | installs/upgrades everything on a host (idempotent, never replaces an existing vault) |
 | `bin/sec` | the CLI agents use |
+| `bin/sec-mcp`, `lib/mcp_server.py` | optional local MCP discovery interface |
 | `lib/common.py` | shared dotenv parser, command environment, and backup retention |
 | `lib/import.py` | the importer behind `sec import` (stdlib Python >= 3.11 + keepassxc-cli) |
 | `examples/sources.example.toml` | every source type, documented |
@@ -154,7 +155,7 @@ Then check that a fresh agent uses it without help, e.g.
 `claude -p "Find our Cloudflare DNS token and check it works with a read-only API call; don't show it."`.
 
 Installer flags: `--sources FILE` (install FILE as sources.toml if none exists), `--no-system-link`,
-`--no-timer`, `--no-rules`, `--no-import`. Re-running `./install.sh` after `git pull` upgrades `sec` and the
+`--no-timer`, `--no-rules`, `--no-import`, `--with-mcp`. Re-running `./install.sh` after `git pull` upgrades `sec` and the
 importer in place and refreshes the agent rules and installed guide. It preserves the existing database,
 key file and sources configuration; the default import can update imported entries.
 
@@ -201,7 +202,8 @@ belong to the tools themselves).
 
 ## Using it (for agents and humans)
 
-These are `sec` CLI commands, not MCP tools. Run `sec help` for full syntax and options.
+These are the core `sec` CLI commands. The optional [MCP interface](#optional-mcp-interface)
+provides discovery tools alongside them. Run `sec help` for full syntax and options.
 
 | Feature | Command | What it does |
 |---|---|---|
@@ -245,6 +247,90 @@ inside quotes retain their whitespace. Duplicate names use the last assignment; 
 and other non-assignment lines are ignored. Inline `#` characters are literal. Variable expansion,
 escape decoding, and multiline values are not supported; the file is never executed as shell code.
 
+## Optional MCP interface
+
+The CLI works without MCP. Enable MCP when you want your agent client to discover structured
+vault tools automatically. This optional interface uses the [official MCP Python SDK](https://py.sdk.modelcontextprotocol.io/)
+and runs locally over **stdio**, launched by your client; it opens no HTTP port.
+
+### Install and connect
+
+```bash
+# From the repository checkout; keeps the existing vault and skips importing credentials.
+./install.sh --with-mcp --no-import
+```
+
+Python venv support is required (`sudo apt-get install python3-venv` on apt systems if missing).
+The option installs the pinned SDK and its dependencies into
+`~/.local/share/agents-vault/mcp-venv` and adds `~/.local/bin/sec-mcp`.
+The default installation adds no MCP dependencies. Rerun with `--with-mcp` when upgrading MCP
+so its dependencies are refreshed too; normal upgrades refresh an existing MCP server's code.
+
+In your agent client's MCP settings, add a **local stdio server** whose command is the absolute
+path to `~/.local/bin/sec-mcp`, with no arguments. For clients using `mcpServers` JSON:
+
+```json
+{
+  "mcpServers": {
+    "agents-vault": {
+      "command": "/home/your-user/.local/bin/sec-mcp"
+    }
+  }
+}
+```
+
+Replace the example path with your actual home directory; `~` may not expand in client settings.
+Use the client's equivalent configuration format if it does not accept this JSON. The client must
+launch the server as the vault-owning OS user on the same host. If using a custom vault location,
+set `SEC_VAULT_DIR` in the server's environment to its absolute path. Do not put credentials in
+client configuration. Installation does not edit client settings automatically.
+
+Restart or reconnect your client, check that the three tools below appear, then call `list_entries`.
+A direct terminal launch waits for MCP protocol input; it is not an interactive CLI.
+To test the protocol using a throwaway vault from the checkout:
+
+```bash
+~/.local/share/agents-vault/mcp-venv/bin/python tests/mcp_integration.py
+```
+
+### Available tools
+
+| MCP tool | Arguments | Returns |
+|---|---|---|
+| `list_entries` | optional `group` | Entry paths, optionally restricted to a group and its descendants |
+| `find_entries` | `query` | Paths matching entry, field, or attachment names, case-insensitively |
+| `describe_entry` | `entry` | Entry path, field names, and attachment names |
+
+These tools are read-only. They do not return passwords, usernames, URLs, notes, custom-field
+values, or attachment contents. Search does not inspect values or notes. Names themselves are
+visible to the model: keep secrets out of entry, group, field, and attachment names.
+
+Use `sec run` for credential injection, `sec set` through stdin for saving, and `sec file` for
+attachments. There is no MCP password-return, credential-input, arbitrary-command, or file-export
+tool. Clients without terminal access can discover credentials but cannot use or update them
+through this interface alone. MCP does not replace the hourly importer or change its behavior.
+
+### Pros and cons
+
+**Advantages:** clients discover named tools and argument schemas without memorizing CLI syntax.
+The same discovery interface works across compatible MCP clients, with structured results that
+are easier for agents to interpret. Credential values stay out of these tool responses.
+
+**Trade-offs:** MCP adds a Python environment, SDK dependencies, client configuration, and another
+process to maintain. Tool availability and invocation depend on the client. Names and tool calls
+may be logged or sent to the model provider. The server process can decrypt the vault locally;
+its limited tool surface is not an OS security boundary or per-agent access control. Each request
+reads a fresh vault snapshot, so very large vaults may make discovery slower.
+
+For terminal-capable coding agents, **start with the CLI**. Add MCP for discovery convenience,
+not as a stronger permission system. A generic MCP tool returning a password would expose it to
+model context; this implementation intentionally keeps credential operations in the CLI.
+
+To disable MCP, remove its client configuration. To uninstall the optional components, stop the
+client's server process and remove `~/.local/bin/sec-mcp`,
+`~/.local/share/agents-vault/mcp_server.py`, and `~/.local/share/agents-vault/mcp-venv`.
+The CLI, vault, and import timer continue to work.
+
 ## The importer
 
 `sec import` reads `~/.config/agents-vault/sources.toml` (override with `AGENTS_VAULT_SOURCES` or `--config`).
@@ -287,7 +373,7 @@ How it behaves:
 - **Rotating the key file.** Run `keepassxc-cli db-edit --set-key-file new.keyx --no-password -k agents.keyx agents.kdbx`,
   then replace `agents.keyx` and update the off-host copy.
 - **Uninstall.** `systemctl --user disable --now agents-vault-import.timer`; remove `~/.local/bin/sec`,
-  `/usr/local/bin/sec`, `~/.local/share/agents-vault`, and the "Secrets (agents vault)" sections. The vault
+  `/usr/local/bin/sec`, `~/.local/bin/sec-mcp` (if installed), `~/.local/share/agents-vault`, and the "Secrets (agents vault)" sections. The vault
   stays in `~/.agents-vault` until you delete it.
 
 ## Gotchas found while building it

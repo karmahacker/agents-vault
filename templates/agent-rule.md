@@ -5,3 +5,5 @@ Credentials for the services we work with (service .env files, cloud/API tokens,
 - `sec get` only to write a value into a file that needs it. Never echo secrets into chat, logs, commits, PR text or command arguments.
 - Save every new credential you create or receive: `printf %s "$VAL" | sec set <service>/<name> -u <user> --url <url> --notes "<what/where used>"` (secret via stdin only).
 - Never store prod credentials here.
+- If the optional agents-vault MCP server is configured, use `list_entries`, `find_entries`, and `describe_entry` for names only. Use `sec` for credential use and writes; never put credential values in MCP arguments or names.
+- For login accounts, store email/login in `UserName` and password in `Password`; use `sec run LOGIN=entry:UserName PASSWORD=entry:Password -- cmd`.

@@ -2,13 +2,14 @@
 # Install agents-vault on an agent server (Linux, systemd). Idempotent: safe to
 # re-run to upgrade; never replaces an existing vault, key file or sources file.
 #
-#   ./install.sh [--sources FILE] [--no-system-link] [--no-timer] [--no-rules] [--no-import]
+#   ./install.sh [--sources FILE] [--no-system-link] [--no-timer] [--no-rules] [--no-import] [--with-mcp]
 #
 #   --sources FILE    copy FILE to ~/.config/agents-vault/sources.toml (only if none exists yet)
 #   --no-system-link  don't symlink /usr/local/bin/sec (needs sudo)
 #   --no-timer        don't install the hourly import timer
 #   --no-rules        don't add the "Secrets (agents vault)" section to agent instruction files
 #   --no-import       don't run the first import
+#   --with-mcp        install optional local MCP discovery tools in a dedicated Python venv
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -16,7 +17,7 @@ VAULT_DIR="${SEC_VAULT_DIR:-$HOME/.agents-vault}"
 CONF_DIR="$HOME/.config/agents-vault"
 SHARE_DIR="$HOME/.local/share/agents-vault"
 BIN_DIR="$HOME/.local/bin"
-SOURCES="" SYSLINK=1 TIMER=1 RULES=1 IMPORT=1
+SOURCES="" SYSLINK=1 TIMER=1 RULES=1 IMPORT=1 MCP=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -25,7 +26,8 @@ while [[ $# -gt 0 ]]; do
     --no-timer) TIMER=0; shift ;;
     --no-rules) RULES=0; shift ;;
     --no-import) IMPORT=0; shift ;;
-    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+    --with-mcp) MCP=1; shift ;;
+    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
 done
@@ -51,6 +53,19 @@ install -m 755 "$REPO/bin/sec" "$BIN_DIR/sec"
 install -m 755 "$REPO/lib/import.py" "$SHARE_DIR/import.py"
 install -m 644 "$REPO/lib/common.py" "$SHARE_DIR/common.py"
 echo "sec -> $BIN_DIR/sec, importer -> $SHARE_DIR/import.py"
+if [[ $MCP == 1 ]]; then
+  step "optional MCP dependencies"
+  python3 -m venv "$SHARE_DIR/mcp-venv" || {
+    echo "Python venv support required; on apt systems install python3-venv, then retry" >&2
+    exit 1
+  }
+  "$SHARE_DIR/mcp-venv/bin/python" -m pip install -r "$REPO/lib/mcp-requirements.txt"
+fi
+if [[ $MCP == 1 || -d $SHARE_DIR/mcp-venv ]]; then
+  install -m 644 "$REPO/lib/mcp_server.py" "$SHARE_DIR/mcp_server.py"
+  install -m 755 "$REPO/bin/sec-mcp" "$BIN_DIR/sec-mcp"
+  echo "MCP launcher -> $BIN_DIR/sec-mcp (configure your client separately)"
+fi
 if [[ $SYSLINK == 1 ]]; then
   # Agents often run non-login shells whose PATH lacks ~/.local/bin.
   sudo ln -sf "$BIN_DIR/sec" /usr/local/bin/sec && echo "linked /usr/local/bin/sec"
