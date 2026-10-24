@@ -71,6 +71,25 @@ class RegressionTests(unittest.TestCase):
         self.command("git", "rm", "--cached", "sample.txt", cwd=repo)
         self.command(str(REPO / "tools/check-no-secrets.sh"), cwd=repo)
 
+    def test_binary_data_does_not_trigger_text_heuristics(self):
+        repo = self.root / "repo"
+        repo.mkdir()
+        self.command("git", "init", "-q", str(repo))
+        (repo / "tools").mkdir()
+        (repo / "tools/allowlist.txt").write_text("")
+        deny = self.root / "denylist.txt"
+        deny.write_text("synthetic-forbidden-marker\n")
+        self.env["AGENTS_VAULT_DENYLIST"] = str(deny)
+        (repo / "image.bin").write_bytes(b"\0synthetic-forbidden-marker")
+        self.command("git", "add", "image.bin", cwd=repo)
+        self.command(str(REPO / "tools/check-no-secrets.sh"), cwd=repo)
+        self.create_vault()
+        self.command(str(REPO / "bin/sec"), "set", "test/value", input="synthetic-forbidden-marker")
+        result = subprocess.run([str(REPO / "tools/check-no-secrets.sh")],
+                                cwd=repo, env=self.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("contains a value stored in the vault", result.stdout)
+
     def test_env_import_and_execution_agree(self):
         self.create_vault()
         source = self.root / "app.env"

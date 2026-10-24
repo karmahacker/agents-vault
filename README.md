@@ -1,5 +1,7 @@
 # agents-vault
 
+![Claude Code, Codex, Gemini, and other agents use sec CLI to access a local KeePassXC vault, with hourly credential imports, a key file, and pre-write backups.](docs/images/agents-vault-overview.png)
+
 A local, on-prem credential store for AI coding agents (Claude Code, Codex, Gemini/Antigravity, Kimi, ...)
 on an agent server. Agents look up and use passwords, tokens, SSH keys, certificates and whole `.env` files
 themselves instead of asking a human, and save new credentials they create.
