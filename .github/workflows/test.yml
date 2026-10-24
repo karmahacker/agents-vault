@@ -1,0 +1,38 @@
+name: Test Linux and macOS
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Linux dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y keepassxc
+      - name: macOS dependencies
+        if: runner.os == 'macOS'
+        run: brew install --cask keepassxc
+      - name: CLI tests
+        run: |
+          bash -n install.sh bin/sec bin/sec-mcp tests/smoke.sh tools/check-no-secrets.sh
+          tests/smoke.sh
+          python3 tests/regression.py
+      - name: Install optional MCP without importing host credentials
+        run: ./install.sh --with-mcp --no-system-link --no-timer --no-rules --no-import
+      - name: Installed tools and MCP tests
+        run: |
+          "$HOME/.local/bin/sec" help
+          "$HOME/.local/share/agents-vault/mcp-venv/bin/python" tests/mcp_integration.py
+      - name: Generate and validate macOS scheduler configuration
+        if: runner.os == 'macOS'
+        run: |
+          ./install.sh --no-system-link --no-rules --no-import
+          plutil -lint "$HOME/Library/LaunchAgents/local.agents-vault.import.plist"

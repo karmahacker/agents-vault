@@ -33,7 +33,7 @@ URL `ssh://user@host`; API tokens keep the env-var name they are used under as a
 
 ## Maintenance
 - Entries listed in `~/.config/agents-vault/sources.toml` are imported from files on this host by
-  `sec import` (hourly user timer `agents-vault-import.timer`). Editing a source file updates its entry;
+  `sec import` (hourly systemd timer on Linux or `local.agents-vault.import` LaunchAgent on macOS). Editing a source file updates its entry;
   never edit those entries by hand. Everything else is hand/agent-managed and never overwritten.
 - Every write is backed up first (`sec backups`, last 200 kept in ~/.agents-vault/backups).
 - Open in the KeePassXC GUI with key file agents.keyx and an empty password.
@@ -58,3 +58,12 @@ for credential operations. Never pass secrets in MCP arguments or names. The CLI
 
 For email/password accounts, use `sec set <entry> -u <email>` with the password on stdin.
 Use `sec run LOGIN=entry:UserName PASSWORD=entry:Password -- cmd` to supply both without printing.
+
+## macOS notes
+The installer uses Homebrew Python and KeePassXC (or the CLI inside the installed KeePassXC app).
+Commands live in `~/.local/bin`; use absolute paths if your agent does not include it in PATH.
+Hourly imports use `~/Library/LaunchAgents/local.agents-vault.import.plist`, loaded at graphical
+login. Check with `launchctl print "gui/$(id -u)/local.agents-vault.import"`.
+Imports pause during logout and sleep; use `sec import` for an immediate refresh.
+Logs are in the vault directory as `import.log` and `import-error.log` and are not rotated.
+Linux uses systemd with optional linger instead. `--no-timer` skips setup on either OS.

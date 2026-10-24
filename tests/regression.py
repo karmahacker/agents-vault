@@ -5,6 +5,7 @@ import fcntl
 import importlib.util
 import io
 import os
+import plistlib
 from pathlib import Path
 import subprocess
 import sys
@@ -15,7 +16,8 @@ from unittest.mock import patch
 sys.dont_write_bytecode = True
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "lib"))
-from common import backup
+from common import backup, lock_fd
+from launchd import write_plist
 
 spec = importlib.util.spec_from_file_location("importer", REPO / "lib/import.py")
 importer = importlib.util.module_from_spec(spec)
@@ -130,6 +132,43 @@ class RegressionTests(unittest.TestCase):
         backup(self.vault)
         self.assertEqual({p.read_text() for p in (self.vault / "backups").glob("*.kdbx")},
                          {"first", "second"})
+
+    def test_shell_retains_lock_after_python_helper_exits(self):
+        lock_path = self.vault / ".lock"
+        script = 'exec 9>"$1"; python3 "$2" lock 9 || exit; echo ready; read -r done'
+        process = subprocess.Popen(["bash", "-c", script, "test", str(lock_path),
+                                    str(REPO / "lib/common.py")],
+                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        try:
+            self.assertEqual(process.stdout.readline(), "ready\n")
+            with lock_path.open("w") as contender:
+                with self.assertRaises(BlockingIOError):
+                    fcntl.flock(contender, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                with self.assertRaises(SystemExit):
+                    lock_fd(contender.fileno(), timeout=0)
+            process.communicate("done\n", timeout=5)
+            self.assertEqual(process.returncode, 0)
+            with lock_path.open("w") as contender:
+                fcntl.flock(contender, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.communicate()
+
+    def test_launchd_paths_and_permissions(self):
+        target = self.root / "job.plist"
+        vault = str(self.root / "vault & files")
+        write_plist(str(target), "/opt/homebrew/bin/python3", "/Users/example user/import.py",
+                    vault, "/Users/example user/sources.toml", "/opt/homebrew/bin:/usr/bin")
+        with target.open("rb") as stream:
+            job = plistlib.load(stream)
+        self.assertEqual(job["ProgramArguments"],
+                         ["/opt/homebrew/bin/python3", "/Users/example user/import.py"])
+        self.assertEqual(job["EnvironmentVariables"]["SEC_VAULT_DIR"], vault)
+        self.assertEqual(job["StartInterval"], 3600)
+        self.assertNotIn("RunAtLoad", job)
+        self.assertEqual(job["Umask"], 0o077)
+        self.assertEqual(target.stat().st_mode & 0o777, 0o600)
 
     def test_sources_collected_before_lock_and_snapshot_under_lock(self):
         self.config.write_text("[[probe]]\n")

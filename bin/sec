@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # sec — agent access to the local KeePassXC vault (~/.agents-vault).
-# Key-file unlock, no password. Writes are serialized with flock and
+# Key-file unlock, no password. Writes are serialized with Python fcntl.flock and
 # preceded by a timestamped backup.
 set -euo pipefail
 
@@ -8,6 +8,8 @@ VAULT_DIR="${SEC_VAULT_DIR:-$HOME/.agents-vault}"
 DB="$VAULT_DIR/agents.kdbx"
 KEY="$VAULT_DIR/agents.keyx"
 LIB_DIR="$(dirname "${SEC_IMPORTER:-$HOME/.local/share/agents-vault/import.py}")"
+
+[[ ! -f $LIB_DIR/runtime.sh ]] || source "$LIB_DIR/runtime.sh"
 
 die() { echo "sec: $*" >&2; exit 1; }
 kp()  { keepassxc-cli "$1" --no-password -k "$KEY" "${@:2}"; }
@@ -21,7 +23,7 @@ backup() {
 # Run a mutating command under an exclusive lock, after a backup.
 write() {
   exec 9>"$VAULT_DIR/.lock"
-  flock -w 30 9 || die "vault is locked by another writer"
+  python3 "$LIB_DIR/common.py" lock 9 || exit 1
   backup
   "$@"
 }

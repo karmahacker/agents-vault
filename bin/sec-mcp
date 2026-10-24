@@ -2,6 +2,7 @@
 # Optional stdio MCP server; stdout is reserved for the protocol.
 set -euo pipefail
 share="$HOME/.local/share/agents-vault"
+[[ ! -f $share/runtime.sh ]] || source "$share/runtime.sh"
 [[ -x $share/mcp-venv/bin/python ]] || {
   echo 'sec-mcp: optional dependencies missing; run ./install.sh --with-mcp --no-import from the checkout' >&2
   exit 1

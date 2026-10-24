@@ -59,7 +59,7 @@ read audit log. Anyone with access to both the database and key file can read it
 | `examples/sources.example.toml` | every source type, documented |
 | `templates/agent-rule.md` | the section added to CLAUDE.md / AGENTS.md / GEMINI.md |
 | `templates/vault-README.md` | guide placed at `~/.agents-vault/README.md` for agents |
-| `systemd/` | hourly `agents-vault-import` user timer |
+| `systemd/`, `lib/launchd.py` | hourly imports through systemd on Linux or launchd on macOS |
 | `tests/smoke.sh` | end-to-end test on a throwaway vault |
 | `tools/check-no-secrets.sh` | fails if any vault value appears in this repo (pre-commit hook) |
 
@@ -77,14 +77,17 @@ read audit log. Anyone with access to both the database and key file can read it
   rules tell agents to use `sec run` (values go into the child process's environment) rather than printing them.
 - **The vault is an index, not the only copy.** The importer copies; it never moves or deletes source files.
 
-## Install on a new agent server
+## Install on Linux or macOS
 
-Requirements: Linux with systemd, `sudo`, Python >= 3.11, `keepassxc-cli` >= 2.7 (installed by the script on
-apt systems). Tested on Ubuntu 24.04 with KeePassXC 2.7.6.
+Requirements: Python >= 3.11 and `keepassxc-cli` >= 2.7. Linux uses a systemd user timer;
+macOS uses a per-user launchd agent. The CLI works without a scheduler (`--no-timer`).
+Linux apt systems can install KeePassXC through `sudo`; macOS can install missing dependencies
+through [Homebrew](https://brew.sh/). Linux was tested locally on Ubuntu 24.04 with KeePassXC 2.7.6;
+the repository's CI runs CLI and MCP tests on both Linux and macOS.
 
 ### Let a coding agent handle installation
 
-Open your coding agent on the Linux host where the vault should live, under the user account that
+Open your coding agent on the Linux or macOS host where the vault should live, under the user account that
 will use it, and paste this prompt. The agent needs terminal access to that host and access to this
 repository: open the session in its checkout, or provide its clone URL with the prompt.
 If administrator authentication is needed, complete it through your terminal or the
@@ -97,8 +100,8 @@ provide. If neither is available, ask me for the clone URL. Read its
 README and applicable agent instructions first. Use main unless I specify another
 branch, and fetch current code without discarding local edits.
 
-Check Linux, Python >= 3.11, keepassxc-cli >= 2.7, flock, and the systemd user
-session. Install missing dependencies using the documented procedure. Preserve
+Check the OS, Python >= 3.11, and keepassxc-cli >= 2.7. On Linux check the
+systemd user session; on macOS check Homebrew and the graphical login session. Install missing dependencies using the documented procedure. Preserve
 any existing vault, key file, sources configuration, and unrelated agent rules.
 If an existing vault or key is missing its counterpart, stop and report it rather
 than creating a replacement. Never print credentials or put them in command
@@ -111,8 +114,8 @@ sources. Exclude production/staging credentials and coding-agent login files.
 For an upgrade, retain the existing sources and installation preferences.
 
 Run ./install.sh with the appropriate documented flags. Set up the hourly user
-timer and enable linger for this user so imports continue after logout. If the
-host cannot support those steps or required privileges are unavailable, complete
+schedule: use systemd and enable linger on Linux; use a launchd LaunchAgent
+on macOS. Mac imports run only while logged in and awake. If the host cannot support those steps or required privileges are unavailable, complete
 the independent steps and report exactly what remains incomplete.
 
 Validate with tests/smoke.sh and python3 tests/regression.py (throwaway data).
@@ -120,8 +123,8 @@ Then verify the installed sec resolves to the expected location, run sec help
 and sec ls without displaying values, and run sec import --dry-run. After the
 initial import, expect 0 would change; investigate changes or skipped sources
 instead of treating an exit code alone as success. Check that the user timer is
-enabled and active, linger is enabled, and the installed guide and agent rules
-are present. Confirm the vault directory is mode 0700 and the database and key
+enabled and active on Linux (with linger), or the LaunchAgent is loaded on
+macOS. Check that the installed guide and agent rules are present. Confirm the vault directory is mode 0700 and the database and key
 are mode 0600. Do not rotate credentials or contact external services to test them.
 
 Finish with the installed branch and commit, checks passed, any skipped sources,
@@ -142,8 +145,9 @@ $EDITOR ~/.config/agents-vault/sources.toml     # rebuilding a host? restore its
 # 2. Install: deps, sec, importer, vault + key file, hourly timer, agent rules, first import.
 ./install.sh
 
-# 3. Let the timer run while nobody is logged in.
-sudo loginctl enable-linger "$USER"
+# 3. Linux only: let the timer run while nobody is logged in.
+# On macOS, skip this step; the LaunchAgent runs in your logged-in session.
+if [ "$(uname -s)" = Linux ]; then sudo loginctl enable-linger "$USER"; fi
 
 # 4. Verify.
 tests/smoke.sh                 # throwaway vault, touches nothing real
@@ -158,6 +162,47 @@ Installer flags: `--sources FILE` (install FILE as sources.toml if none exists),
 `--no-timer`, `--no-rules`, `--no-import`, `--with-mcp`. Re-running `./install.sh` after `git pull` upgrades `sec` and the
 importer in place and refreshes the agent rules and installed guide. It preserves the existing database,
 key file and sources configuration; the default import can update imported entries.
+
+### macOS setup and scheduled imports
+
+Install [Homebrew](https://brew.sh/) if needed, then:
+
+```bash
+brew install python
+brew install --cask keepassxc
+./install.sh
+# Optional MCP interface:
+# ./install.sh --with-mcp --no-import
+```
+
+Homebrew's [KeePassXC cask](https://formulae.brew.sh/cask/keepassxc) includes `keepassxc-cli`.
+The installer also recognizes the CLI in `/Applications/KeePassXC.app/Contents/MacOS` for a
+manual app installation. It checks both Apple Silicon (`/opt/homebrew`) and Intel (`/usr/local`)
+Homebrew paths. No GNU `flock`, coreutils, or replacement Bash is required.
+
+On macOS, installation defaults to user-local commands in `~/.local/bin`, without a system
+symlink or `sudo`. Add that directory to your shell's PATH, or invoke `~/.local/bin/sec` directly.
+The installer saves the Python and KeePassXC directories in a private `runtime.sh` alongside
+the installed scripts so GUI-launched agents can find them. Rerun installation if those
+applications move. MCP clients use `/Users/your-user/.local/bin/sec-mcp` as their command.
+
+Hourly imports use `~/Library/LaunchAgents/local.agents-vault.import.plist`, with absolute
+program paths and the selected vault and sources paths. The installer loads it in your GUI
+session when available; otherwise it is installed for the next graphical login. Per-user
+[LaunchAgents run while the user is logged in](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdJobs.html).
+This setup does not provide Linux-style linger: imports pause while logged out or asleep.
+Run `sec import` after waking if you need an immediate refresh.
+
+```bash
+launchctl print "gui/$(id -u)/local.agents-vault.import"
+# Trigger an import now through launchd:
+launchctl kickstart "gui/$(id -u)/local.agents-vault.import"
+```
+
+Import output is stored in `~/.agents-vault/import.log` and `import-error.log` (or the custom
+vault directory). These contain names and status messages; do not paste logs without reviewing
+them. Logs are not rotated automatically. `--no-timer` skips scheduler setup on either OS;
+it does not disable a schedule installed previously.
 
 ### Updating an installed version
 
@@ -175,7 +220,7 @@ use `git switch dev` instead. Commit or stash local edits before switching branc
 Pulling code alone does not update the installed copy.
 
 The installer updates `~/.local/bin/sec`, the Python files in `~/.local/share/agents-vault`,
-agent rules, the installed guide, and (when enabled) the systemd units. A differing installed guide
+agent rules, the installed guide, and (when enabled) the systemd units or macOS LaunchAgent. A differing installed guide
 is saved as `~/.agents-vault/README.md.previous.*` before replacement, preserving local notes.
 The existing vault, key, and sources configuration are retained. Imported entries refresh by default;
 to update software without importing, use `./install.sh --no-import`. Reuse flags such as
@@ -260,7 +305,7 @@ and runs locally over **stdio**, launched by your client; it opens no HTTP port.
 ./install.sh --with-mcp --no-import
 ```
 
-Python venv support is required (`sudo apt-get install python3-venv` on apt systems if missing).
+Python venv support is required (`sudo apt-get install python3-venv` on apt systems if missing; Homebrew Python includes it).
 The option installs the pinned SDK and its dependencies into
 `~/.local/share/agents-vault/mcp-venv` and adds `~/.local/bin/sec-mcp`.
 The default installation adds no MCP dependencies. Rerun with `--with-mcp` when upgrading MCP
@@ -372,7 +417,9 @@ How it behaves:
   host *before* running `./install.sh`. The installer keeps an existing vault.
 - **Rotating the key file.** Run `keepassxc-cli db-edit --set-key-file new.keyx --no-password -k agents.keyx agents.kdbx`,
   then replace `agents.keyx` and update the off-host copy.
-- **Uninstall.** `systemctl --user disable --now agents-vault-import.timer`; remove `~/.local/bin/sec`,
+- **Uninstall.** On Linux, run `systemctl --user disable --now agents-vault-import.timer`.
+  On macOS, run `launchctl bootout "gui/$(id -u)/local.agents-vault.import"` in your logged-in
+  session and remove `~/Library/LaunchAgents/local.agents-vault.import.plist`. Then remove `~/.local/bin/sec`,
   `/usr/local/bin/sec`, `~/.local/bin/sec-mcp` (if installed), `~/.local/share/agents-vault`, and the "Secrets (agents vault)" sections. The vault
   stays in `~/.agents-vault` until you delete it.
 

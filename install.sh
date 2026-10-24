@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install agents-vault on an agent server (Linux, systemd). Idempotent: safe to
+# Install agents-vault on an agent server (Linux or macOS). Idempotent: safe to
 # re-run to upgrade; never replaces an existing vault, key file or sources file.
 #
 #   ./install.sh [--sources FILE] [--no-system-link] [--no-timer] [--no-rules] [--no-import] [--with-mcp]
@@ -18,6 +18,15 @@ CONF_DIR="$HOME/.config/agents-vault"
 SHARE_DIR="$HOME/.local/share/agents-vault"
 BIN_DIR="$HOME/.local/bin"
 SOURCES="" SYSLINK=1 TIMER=1 RULES=1 IMPORT=1 MCP=0
+PLATFORM="$(uname -s)"
+case "$PLATFORM" in
+  Darwin)
+    SYSLINK=0
+    export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH:/Applications/KeePassXC.app/Contents/MacOS"
+    ;;
+  Linux) ;;
+  *) echo "supported platforms: Linux and macOS" >&2; exit 1 ;;
+esac
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -35,8 +44,17 @@ done
 step() { printf '\n== %s\n' "$*"; }
 
 step "dependencies"
+if [[ $PLATFORM == Darwin ]]; then
+  if ! python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))' >/dev/null 2>&1; then
+    command -v brew >/dev/null || { echo "install Homebrew and Python >= 3.11, then retry" >&2; exit 1; }
+    brew install python
+  fi
+fi
 if ! command -v keepassxc-cli >/dev/null; then
-  if command -v apt-get >/dev/null; then
+  if [[ $PLATFORM == Darwin ]]; then
+    command -v brew >/dev/null || { echo "install KeePassXC or Homebrew, then retry" >&2; exit 1; }
+    brew install --cask keepassxc
+  elif command -v apt-get >/dev/null; then
     sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends keepassxc
   else
     echo "install keepassxc (keepassxc-cli >= 2.7) with your package manager, then re-run" >&2; exit 1
@@ -44,7 +62,7 @@ if ! command -v keepassxc-cli >/dev/null; then
 fi
 python3 -c 'import sys, tomllib; sys.exit(sys.version_info < (3, 11))' \
   || { echo "python3 >= 3.11 required (tomllib)" >&2; exit 1; }
-command -v flock >/dev/null || { echo "flock (util-linux) required" >&2; exit 1; }
+command -v keepassxc-cli >/dev/null || { echo "keepassxc-cli missing from PATH" >&2; exit 1; }
 echo "keepassxc-cli $(keepassxc-cli --version), $(python3 --version)"
 
 step "scripts"
@@ -52,6 +70,16 @@ install -d -m 755 "$BIN_DIR" "$SHARE_DIR"
 install -m 755 "$REPO/bin/sec" "$BIN_DIR/sec"
 install -m 755 "$REPO/lib/import.py" "$SHARE_DIR/import.py"
 install -m 644 "$REPO/lib/common.py" "$SHARE_DIR/common.py"
+if [[ $PLATFORM == Darwin ]]; then
+  # GUI-launched agents often lack Homebrew and the KeePassXC app in PATH.
+  python3 - "$SHARE_DIR/runtime.sh" "$BIN_DIR" "$(dirname "$(command -v python3)")" "$(dirname "$(command -v keepassxc-cli)")" <<'PYTHON'
+import pathlib, shlex, sys
+prefix = ":".join(dict.fromkeys(sys.argv[2:]))
+path = pathlib.Path(sys.argv[1])
+path.write_text("export PATH=" + shlex.quote(prefix) + ':"$PATH"\n')
+path.chmod(0o600)
+PYTHON
+fi
 echo "sec -> $BIN_DIR/sec, importer -> $SHARE_DIR/import.py"
 if [[ $MCP == 1 ]]; then
   step "optional MCP dependencies"
@@ -101,7 +129,22 @@ else
   IMPORT=0
 fi
 
-if [[ $TIMER == 1 ]] && systemctl --user show-environment >/dev/null 2>&1; then
+if [[ $TIMER == 1 && $PLATFORM == Darwin ]]; then
+  step "hourly launchd import"
+  launch_dir="$HOME/Library/LaunchAgents"
+  install -d -m 700 "$launch_dir"
+  launch_plist="$launch_dir/local.agents-vault.import.plist"
+  python3 "$REPO/lib/launchd.py" "$launch_plist" "$(command -v python3)" \
+    "$SHARE_DIR/import.py" "$VAULT_DIR" "$CONF_DIR/sources.toml" "$PATH"
+  launch_domain="gui/$(id -u)"
+  if launchctl print "$launch_domain" >/dev/null 2>&1; then
+    launchctl bootout "$launch_domain/local.agents-vault.import" 2>/dev/null || true
+    launchctl enable "$launch_domain/local.agents-vault.import"
+    launchctl bootstrap "$launch_domain" "$launch_plist"
+  else
+    echo "LaunchAgent installed; it will load at your next graphical login. No GUI session is active."
+  fi
+elif [[ $TIMER == 1 ]] && systemctl --user show-environment >/dev/null 2>&1; then
   step "hourly import timer"
   install -d "$HOME/.config/systemd/user"
   install -m 644 "$REPO"/systemd/agents-vault-import.{service,timer} "$HOME/.config/systemd/user/"
