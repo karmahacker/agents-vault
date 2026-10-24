@@ -2,6 +2,10 @@
 # End-to-end test of sec + importer against a throwaway vault. Touches nothing real.
 #   tests/smoke.sh
 set -euo pipefail
+# A manually installed macOS app need not expose its CLI on the caller's PATH.
+if [[ $(uname -s) == Darwin ]]; then
+  export PATH="$PATH:/opt/homebrew/bin:/usr/local/bin:/Applications/KeePassXC.app/Contents/MacOS"
+fi
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
 export SEC_VAULT_DIR="$T/vault" SEC_IMPORTER="$REPO/lib/import.py" AGENTS_VAULT_SOURCES="$T/sources.toml"

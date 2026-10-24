@@ -124,9 +124,9 @@ if [[ -e $CONF_DIR/sources.toml ]]; then
 elif [[ -n $SOURCES ]]; then
   install -m 600 "$SOURCES" "$CONF_DIR/sources.toml"; echo "installed $SOURCES as sources.toml"
 else
-  install -m 600 "$REPO/examples/sources.example.toml" "$CONF_DIR/sources.toml"
-  echo "installed the EXAMPLE sources file; edit $CONF_DIR/sources.toml before importing"
-  IMPORT=0
+  (umask 077; printf '%s\n' '# Add selected dev/lab sources here; see examples/sources.example.toml for syntax.' > "$CONF_DIR/sources.toml")
+  chmod 600 "$CONF_DIR/sources.toml"
+  echo "created empty sources configuration; no credentials will be imported until sources are added"
 fi
 
 if [[ $TIMER == 1 && $PLATFORM == Darwin ]]; then
