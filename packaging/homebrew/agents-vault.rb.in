@@ -17,6 +17,7 @@ class AgentsVault < Formula
       export PATH="#{Formula["python@3.12"].opt_libexec}/bin:#{HOMEBREW_PREFIX}/bin:/Applications/KeePassXC.app/Contents/MacOS:$PATH"
       exec "#{opt_libexec}/bin/sec" "$@"
     SH
+    (bin/"sec").chmod 0755
   end
 
   def caveats
